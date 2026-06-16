@@ -56,16 +56,33 @@ README.md          this file
 
 ## Getting started
 
-**Prerequisites:** Docker (for validation) and/or a PostgreSQL 16 server, plus `psql`.
+**Prerequisites:** just **Docker** (Docker Desktop running). No local `psql`/PostgreSQL install needed.
 
 ```bash
-# 1. Verify the whole thing loads cleanly in a disposable container:
-./db/validate.sh
+# Start a persistent local database (creates it, applies all migrations + seeds):
+./db/run_local.sh
 
-# 2. Apply to a real database (see db/migrations/README.md for details):
-for f in db/migrations/[0-9]*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
-psql -v ON_ERROR_STOP=1 -f db/seeds/0001_reference_data.sql
+# Open an interactive SQL shell:
+./db/run_local.sh psql
+
+# Run the end-to-end store/read demo:
+./db/run_local.sh demo
+
+# Stop / resume / wipe:
+docker stop aaa_db        # stop (data kept in a Docker volume)
+docker start aaa_db       # resume
+./db/run_local.sh --reset # wipe and rebuild clean
 ```
+
+Other helpers:
+
+```bash
+./db/validate.sh          # verify everything loads cleanly in a throwaway container (no data kept)
+```
+
+If you later install a PostgreSQL client and want to apply the migrations to your own server,
+see `db/migrations/README.md` for the plain `psql` loop. Day-to-day usage (storing/reading data,
+the security rules) is documented in `docs/usage.md`.
 
 At runtime your application connects as `app_readwrite` and sets the tenant
 context per transaction so RLS can isolate data:
