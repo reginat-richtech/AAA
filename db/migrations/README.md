@@ -10,8 +10,13 @@ Plain `.sql` migration files, applied in **lexical (numeric) order**. The number
 | 0030 | `0030_inventory.sql` | `inventory.*` (products, warehouses, stock) | `core` |
 | 0040 | `0040_invoicing.sql` | `invoicing.*` (invoices, lines, tokenized payments) | `core`, **`inventory`** |
 | 0050 | `0050_legal.sql` | `legal.*` (customer agreements + document metadata) | `core`, **`invoicing`** |
+| 0100 | `0100_security_encryption.sql` | `sec.*` column-encryption + blind-index helper functions | `core` |
+| 0110 | `0110_security_audit.sql` | audit hardening: hash-chained tamper-evidence, point-in-time history (`compensation`/`invoice`), retention | `core`, all domains |
+| 0120 | `0120_security_privacy.sql` | `privacy.*` (data classification, retention, erasure, DSAR), CRM consent enforcement | `core`, all domains |
 
 Then load reference/seed data: `../seeds/0001_reference_data.sql`.
+
+> The `0100`–`0120` security layer is **additive and idempotent** — it enhances the audit trigger backward-compatibly and adds the `sec` and `privacy` schemas. `0110`/`0120` reference the domain tables, so they must run after `0050`.
 
 > **Why this order matters:** `invoicing.invoice_line_item` has a foreign key to `inventory.product`, and `legal.agreement_link` has a foreign key to `invoicing.invoice`. Referenced tables must exist first.
 

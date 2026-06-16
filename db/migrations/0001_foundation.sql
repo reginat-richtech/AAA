@@ -510,11 +510,24 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_migrator') THEN
     -- BYPASSRLS for migrations/seeding; never used by request-path connections.
-    CREATE ROLE app_migrator  NOLOGIN BYPASSRLS;
+    -- Managed providers (Azure Flexible Server, AWS RDS) forbid non-superusers
+    -- from creating BYPASSRLS roles -- fall back to a plain role. Migrations run
+    -- as the admin/owner, which bypasses RLS via table ownership (no FORCE RLS).
+    BEGIN
+      CREATE ROLE app_migrator  NOLOGIN BYPASSRLS;
+    EXCEPTION WHEN insufficient_privilege THEN
+      CREATE ROLE app_migrator  NOLOGIN;
+      RAISE NOTICE 'app_migrator created WITHOUT BYPASSRLS (server forbids it; e.g. Azure/RDS). Migrations run as the admin owner and bypass RLS via ownership.';
+    END;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'crm_sync') THEN
     -- Writes only to crm.* (HubSpot mirror); BYPASSRLS to mirror all tenants.
-    CREATE ROLE crm_sync      NOLOGIN BYPASSRLS;
+    BEGIN
+      CREATE ROLE crm_sync      NOLOGIN BYPASSRLS;
+    EXCEPTION WHEN insufficient_privilege THEN
+      CREATE ROLE crm_sync      NOLOGIN;
+      RAISE NOTICE 'crm_sync created WITHOUT BYPASSRLS; the HubSpot sync worker must set per-tenant context or run as a privileged role.';
+    END;
   END IF;
 END
 $$;

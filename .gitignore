@@ -3,8 +3,11 @@
 
 # Local env / secrets — never commit real credentials or KMS keys
 .env
+.env.*
+!.env.example
 *.local
 db/config/*.local.conf
+deploy/certs/*.pem
 
 # Scratch
 /tmp_*
