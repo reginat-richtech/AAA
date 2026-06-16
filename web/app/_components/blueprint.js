@@ -45,14 +45,13 @@ export function TitleBlock({ sheet, rev = '2026.06', project = 'Richtech Systems
 }
 
 // Page header: title + sub on the left, drawing title block on the right.
-export function PageHeader({ title, sub, sheet }) {
+export function PageHeader({ title, sub }) {
   return (
     <div className="pagehead">
       <div>
         <h1>{title}</h1>
         {sub ? <p className="sub" style={{ marginBottom: 0 }}>{sub}</p> : null}
       </div>
-      <TitleBlock sheet={sheet} />
     </div>
   );
 }
