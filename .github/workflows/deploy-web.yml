@@ -1,33 +1,45 @@
 name: Deploy web → Azure App Service
 
-# Builds the Next.js app in web/ and deploys it to Azure App Service (Linux, Node).
+# Builds the Next.js app in web/ and deploys it to Azure App Service (Linux, Node),
+# authenticating with OIDC / federated credentials — no stored passwords to rotate.
 # Runs on every push to main that touches web/, and can be run manually.
 #
 # ── ONE-TIME SETUP ───────────────────────────────────────────────────────────
-# 1. Create the App Service:  Linux plan, runtime stack = Node 20 LTS.
-#    Note its name and put it in AZURE_WEBAPP_NAME below.
+# A. Create the App Service:  Linux plan, runtime stack = Node 20 LTS.
+#    Put its name in AZURE_WEBAPP_NAME below.
 #
-# 2. Download its publish profile:
-#    App Service → Overview → "Get publish profile" (downloads an .xml file).
-#    Then in GitHub:  repo → Settings → Secrets and variables → Actions →
-#    New repository secret →
-#        Name:  AZURE_WEBAPP_PUBLISH_PROFILE
-#        Value: paste the entire contents of that .xml file
+# B. Create an Entra app registration (the identity GitHub logs in as):
+#      Azure Portal → Microsoft Entra ID → App registrations → New registration.
+#    Note its Application (client) ID + Directory (tenant) ID + your Subscription ID.
 #
-# 3. App Service → Settings → Configuration → Application settings — add:
-#        DATABASE_URL                  postgresql://app_rw:<pw>@<host>.postgres.database.azure.com:5432/aaa?sslmode=require
-#        ANTHROPIC_API_KEY             <your key>
-#        CLAUDE_MODEL                  claude-sonnet-4-6
-#        JOTFORM_API_KEY               <your key>          (optional)
-#        HUBSPOT_TOKEN                 <your token>        (optional)
-#        GOOGLE_SERVICE_ACCOUNT_JSON   <paste the whole service-account JSON inline>  (optional)
-#        GOOGLE_IMPERSONATE_SUBJECT    chatgpt@richtechsystem.com                     (optional)
-#        SCM_DO_BUILD_DURING_DEPLOYMENT  false   ← we build here, so Azure must NOT rebuild
-#    (Use Key Vault references for the secret values once it's working.)
+# C. Let it deploy: App Service (or its resource group) → Access control (IAM) →
+#      Add role assignment → "Website Contributor" → assign to that app registration.
 #
-# 4. App Service → Settings → Configuration → General settings →
-#    Startup Command:  npm start    (App Service usually auto-detects this; set it
-#    explicitly if the app doesn't start.)
+# D. Add a federated credential (so GitHub logs in WITHOUT a secret):
+#      App registration → Certificates & secrets → Federated credentials → Add →
+#      scenario "GitHub Actions deploying Azure resources":
+#         Organization: reginat-richtech
+#         Repository:   AAA
+#         Entity:       Branch          Branch name: main
+#      → this produces subject:  repo:reginat-richtech/AAA:ref:refs/heads/main
+#    (To also allow manual runs from other branches, add a second credential, or
+#     use the "Environment" entity instead.)
+#
+# E. Add three GitHub repo secrets (Settings → Secrets and variables → Actions):
+#      AZURE_CLIENT_ID        = the app registration's Application (client) ID
+#      AZURE_TENANT_ID        = Directory (tenant) ID
+#      AZURE_SUBSCRIPTION_ID  = your subscription ID
+#
+# F. App Service → Configuration → Application settings — add the runtime env
+#    (the app crashes on boot without the AUTH_* / GOOGLE_* sign-in vars):
+#      DATABASE_URL, OPENAI_API_KEY, OPENAI_MODEL,
+#      AUTH_SECRET, AUTH_URL=https://<your-domain>,
+#      GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ALLOWED_OAUTH_DOMAINS, ADMIN_EMAILS,
+#      (optional) JOTFORM_API_KEY, GOOGLE_SERVICE_ACCOUNT_JSON (inline), GOOGLE_IMPERSONATE_SUBJECT,
+#      and  SCM_DO_BUILD_DURING_DEPLOYMENT = false   (we build here, not on Azure).
+#
+# G. App Service → Configuration → General settings → Startup Command:  npm start
+#    (usually auto-detected; set explicitly if the app doesn't start).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -37,6 +49,10 @@ on:
       - 'web/**'
       - '.github/workflows/deploy-web.yml'
   workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required for OIDC login to Azure
+  contents: read    # required for actions/checkout
 
 env:
   AZURE_WEBAPP_NAME: aaa-web   # <-- CHANGE to your App Service name
@@ -64,9 +80,15 @@ jobs:
         working-directory: web
         run: npm run build
 
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Deploy to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: web
