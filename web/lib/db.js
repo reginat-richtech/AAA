@@ -2,9 +2,17 @@ import { Pool } from 'pg';
 
 // Single shared pool across hot-reloads in dev.
 const globalForPg = globalThis;
+const connectionString = process.env.DATABASE_URL || '';
+
+// Managed Postgres (Azure/RDS/etc.) requires TLS; local Docker does not. Enable
+// SSL for any non-local host unless the URL explicitly disables it. rejectUnauthorized
+// is false so we don't have to ship the provider's CA bundle — the link is still encrypted.
+const isLocal = /@(localhost|127\.0\.0\.1|\[::1\]|::1)[:/]/.test(connectionString);
+const ssl = isLocal || /sslmode=disable/.test(connectionString) ? undefined : { rejectUnauthorized: false };
+
 export const pool =
   globalForPg._aaaPool ||
-  new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+  new Pool({ connectionString, max: 5, ssl, connectionTimeoutMillis: 10000 });
 if (!globalForPg._aaaPool) globalForPg._aaaPool = pool;
 
 export async function query(text, params) {
