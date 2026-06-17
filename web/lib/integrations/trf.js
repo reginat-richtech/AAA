@@ -1,16 +1,19 @@
 // Travel Request Form (TRF) matching — ported from the old app
 // (admin.py _fetch_jotform_travel_requests + _find_trf_match).
 //
-// TRFs are read from the already-ingested ext.jotform_submission table (any
-// JotForm form whose title looks like "Travel Request"). Field parsing is
-// best-effort (JotForm forms vary), and the whole thing DEGRADES GRACEFULLY:
-// if there is no such form, the table isn't ingested, or the DB is unreachable,
-// fetchTravelRequests() returns [] and the ✅/⏰/❌ flags simply stay hidden.
-import { query } from '../db';
+// TRFs are fetched live from JotForm (the Richtech "Travel Request Form")
+// using JOTFORM_API_KEY, then matched to Navan bookings. DEGRADES GRACEFULLY:
+// with no API key / no submissions / a fetch error, fetchTravelRequests()
+// returns [] and the ✅/⏰/❌ flags simply stay hidden.
+const KEY = process.env.JOTFORM_API_KEY || '';
 
 const PROXIMITY_DAYS = 2;
 const norm = (s) => String(s || '').trim().toLowerCase();
 const EMAIL_RE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+
+// The Richtech "Travel Request Form (TRF)" JotForm id (override via env).
+// Fields: requestersName(3) · companyEmail(4) · departureDate(5) · returnDate(6).
+const TRF_FORM_ID = process.env.TRAVEL_REQUEST_FORM_ID || '253216066321044';
 
 // Normalize various JotForm date shapes to an ISO 'YYYY-MM-DD' string.
 function toISO(v) {
@@ -37,32 +40,38 @@ function answersOf(raw) {
 
 // Heuristically pull traveler email/name + departure/return dates from a TRF.
 export function parseTRF(raw) {
-  let email = '', name = '', depart = '', ret = '';
-  for (const { label, value } of answersOf(raw)) {
-    const flat = typeof value === 'string' ? value : '';
-    if (!email && (label.includes('email') || EMAIL_RE.test(flat))) {
-      const m = flat.match(EMAIL_RE); if (m) email = norm(m[0]);
+  const a = (raw && raw.answers) || {};
+  const byName = {};
+  for (const x of Object.values(a)) if (x && x.name) byName[norm(x.name)] = x.answer;
+  const fullname = (v) => (v && typeof v === 'object' ? [v.first, v.last].filter(Boolean).join(' ') : String(v || ''));
+  const emailIn = (v) => { const m = (typeof v === 'string' ? v : '').match(EMAIL_RE); return m ? m[0] : ''; };
+
+  // Exact mapping for the known TRF, by JotForm field `name`.
+  let email = norm(emailIn(byName.companyemail));
+  let name = norm(fullname(byName.requestersname));
+  let depart = toISO(byName.departuredate);
+  let ret = toISO(byName.returndate);
+
+  // Heuristic fallback — fills anything the exact names missed (or other forms).
+  if (!email || !name || !depart || !ret) {
+    for (const { label, value } of answersOf(raw)) {
+      const flat = typeof value === 'string' ? value : '';
+      if (!email && (label.includes('email') || EMAIL_RE.test(flat))) email = norm(emailIn(flat));
+      if (!name && (label.includes('requester') || label.includes('traveler') || label.includes('employee'))) { const v = fullname(value); if (v) name = norm(v); }
+      if (!depart && (label.includes('depart') || label.includes('fly out') || label.includes('outbound'))) depart = toISO(value);
+      if (!ret && (label.includes('return') || label.includes('fly back'))) ret = toISO(value);
     }
-    if (!name && (label.includes('traveler') || label.includes('employee') ||
-        (label.includes('name') && !label.includes('event') && !label.includes('company') && !label.includes('hotel')))) {
-      const v = value && typeof value === 'object' ? [value.first, value.last].filter(Boolean).join(' ') : flat;
-      if (v) name = norm(v);
-    }
-    if (!depart && (label.includes('depart') || label.includes('fly out') || label.includes('outbound') || (label.includes('start') && label.includes('date')))) depart = toISO(value);
-    if (!ret && (label.includes('return') || label.includes('fly back') || label.includes('back') || (label.includes('end') && label.includes('date')))) ret = toISO(value);
   }
   return { email, name, depart, ret };
 }
 
 export async function fetchTravelRequests() {
+  if (!KEY) return [];
   try {
-    const { rows } = await query(
-      `select raw from ext.jotform_submission
-       where form_title ilike '%travel%request%'
-         and created_at > now() - interval '180 days'
-       order by created_at desc limit 500`
-    );
-    return rows.map((r) => parseTRF(r.raw)).filter((t) => t.depart || t.ret);
+    const r = await fetch(`https://api.jotform.com/form/${TRF_FORM_ID}/submissions?limit=500&apiKey=${encodeURIComponent(KEY)}`);
+    if (!r.ok) return [];
+    const subs = (await r.json()).content || [];
+    return subs.map(parseTRF).filter((t) => t.depart || t.ret);
   } catch {
     return [];
   }

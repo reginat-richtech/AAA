@@ -31,13 +31,23 @@ export async function POST(req) {
   if (!a.ok) return a.response;
   const sources = parseSources(req);
   if (!sources.length) return NextResponse.json({ error: 'No valid source. Use ?source=navan,jotform,quickbooks or all.' }, { status: 400 });
-  const results = await runSync(sources);
-  return NextResponse.json({ ran: sources, results });
+  // Always return JSON — even a DB/connection failure becomes a readable error
+  // instead of an empty 500 body the UI can't parse.
+  try {
+    const results = await runSync(sources);
+    return NextResponse.json({ ran: sources, results });
+  } catch (e) {
+    return NextResponse.json({ error: String(e?.message || e), ran: sources }, { status: 500 });
+  }
 }
 
 // Status for the Data Sync page (admin only).
 export async function GET() {
   const { response } = await requireAdmin();
   if (response) return response;
-  return NextResponse.json(await lastSyncStatus());
+  try {
+    return NextResponse.json(await lastSyncStatus());
+  } catch (e) {
+    return NextResponse.json({ error: String(e?.message || e), last: [], totals: {} }, { status: 500 });
+  }
 }

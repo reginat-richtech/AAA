@@ -13,8 +13,17 @@ export default function DataSync() {
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
 
+  // Parse defensively: an empty body (gateway timeout) or HTML error page won't
+  // throw "Unexpected end of JSON input" — we surface a readable message instead.
+  async function parseRes(r) {
+    const text = await r.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+    return { status: r.status, data, text };
+  }
+
   const load = useCallback(() => {
-    fetch('/api/admin/sync').then((r) => r.json()).then(setStatus).catch(() => {});
+    fetch('/api/admin/sync').then(parseRes).then((p) => { if (p.data && !p.data.error) setStatus(p.data); }).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -22,9 +31,14 @@ export default function DataSync() {
     setBusy(source); setMsg(null);
     try {
       const r = await fetch(`/api/admin/sync?source=${source}`, { method: 'POST' });
-      const j = await r.json();
-      if (!r.ok) setMsg({ err: j.error || 'Sync failed' });
-      else setMsg({ ok: (j.results || []).map((x) => `${x.source}: ${x.skipped ? 'skipped' : x.ok ? x.rows + ' rows' : 'error'}`).join(' · ') });
+      const p = await parseRes(r);
+      if (p.data?.results) {
+        setMsg({ ok: p.data.results.map((x) => `${x.source}: ${x.skipped ? 'skipped' : x.ok ? x.rows + ' rows' : 'error: ' + (x.error || '')}`).join(' · ') });
+      } else if (p.data?.error) {
+        setMsg({ err: p.data.error });
+      } else {
+        setMsg({ err: `Server returned ${p.status || 'no'} with no JSON. A large "Sync all" can exceed the gateway timeout — it may still be running; wait and hit Refresh, or sync one source at a time.` });
+      }
     } catch (e) { setMsg({ err: String(e?.message || e) }); }
     setBusy(null);
     load();
