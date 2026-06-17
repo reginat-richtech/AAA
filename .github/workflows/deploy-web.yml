@@ -58,3 +58,34 @@ jobs:
           az extension add --name containerapp --only-show-errors
           az containerapp update -g "$RG" -n "$APP" \
             --image "${ACR}.azurecr.io/${IMAGE}:${{ github.sha }}"
+
+      - name: Open Postgres firewall for this app, then sync datasets
+        env:
+          DB_RG: aaa-rg                                  # resource group of the Postgres flexible server (edit if different)
+          APP_URL: ${{ secrets.APP_URL }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+        run: |
+          set -uo pipefail   # best-effort: never fail the deploy on these
+          # 1) let the Container App's egress reach Azure Postgres ----------------
+          PG=$(az postgres flexible-server list -g "$DB_RG" --query "[0].name" -o tsv 2>/dev/null || true)
+          if [ -n "${PG:-}" ]; then
+            echo "Postgres server: $PG (rg=$DB_RG)"
+            # Container Apps (Consumption) egress from a large rotating IP pool, so
+            # per-IP rules are infeasible — allow Azure-internal traffic instead.
+            az postgres flexible-server firewall-rule create -g "$DB_RG" --name "$PG" \
+              --rule-name AllowAzureServices --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0 \
+              --only-show-errors >/dev/null 2>&1 && echo "  ✓ AllowAzureServices ensured" \
+              || echo "  ! could not set AllowAzureServices (permissions?) — set it once manually"
+          else
+            echo "  ! no Postgres flexible server found in resource group '$DB_RG' — open the firewall manually (see chat)"
+          fi
+          # 2) sync every deploy (needs APP_URL + SYNC_CRON_SECRET repo secrets) ---
+          if [ -n "${APP_URL:-}" ] && [ -n "${SYNC_CRON_SECRET:-}" ]; then
+            echo "waiting ~45s for the new revision to become healthy…"; sleep 45
+            curl -fsS -X POST "${APP_URL%/}/api/admin/sync?source=all" \
+              -H "Authorization: Bearer ${SYNC_CRON_SECRET}" --max-time 290 | head -c 800 \
+              && echo "" && echo "  ✓ post-deploy sync triggered" \
+              || echo "  ! post-deploy sync failed (the daily job will retry)"
+          else
+            echo "  • APP_URL / SYNC_CRON_SECRET repo secrets not set — skipping post-deploy sync"
+          fi
