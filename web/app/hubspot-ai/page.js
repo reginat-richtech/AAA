@@ -50,6 +50,14 @@ function renderLeft(data) {
         </>
       )}
 
+      <div className="sev-legend">
+        <span><i className="d fail" /> Critical</span>
+        <span><i className="d warn" /> Warning</span>
+        <span><i className="d info" /> Info</span>
+        <span><i className="d ok" /> OK</span>
+        <span className="note">· the left-border color on each alert is its severity</span>
+      </div>
+
       <style>{`
         .alert-list { display: flex; flex-direction: column; gap: 8px; }
         .alert-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 9px; background: var(--surface); color: var(--ink); text-decoration: none; }
@@ -62,6 +70,9 @@ function renderLeft(data) {
         .alert-title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .alert-go { color: var(--muted); font-size: 18px; flex: 0 0 auto; }
         .email-h { margin: 18px 0 10px; border-top: 1px dashed var(--line); padding-top: 14px; }
+        .sev-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--muted); }
+        .sev-legend .d { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+        .sev-legend .d.fail { background: var(--bad); } .sev-legend .d.warn { background: var(--warn); } .sev-legend .d.info { background: var(--info); } .sev-legend .d.ok { background: var(--ok); }
       `}</style>
     </>
   );

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { PageHeader } from '../../_components/blueprint';
+import { getAi, peekAi } from '../../../lib/aiCache';
 
 function DealsTable({ deals }) {
   if (!deals?.length) return <p className="note">No deals.</p>;
@@ -79,10 +80,11 @@ export default function HubSpotAlertDetail() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/ai/hubspot')
-      .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error || 'Failed to load'); return j; })
-      .then(setData)
-      .catch((e) => setErr(e.message))
+    const cached = peekAi('/api/ai/hubspot');
+    if (cached != null) { setData(cached); setLoading(false); }   // instant from the list page's cache
+    getAi('/api/ai/hubspot')
+      .then((d) => { setData(d); if (d && d.ok === false) setErr(d.error || 'Failed to load'); })
+      .catch((e) => setErr(String(e?.message || e)))
       .finally(() => setLoading(false));
   }, []);
 

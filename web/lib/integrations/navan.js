@@ -2,6 +2,8 @@
 // /v1/bookings over a date window. Computes the Travel Expense Review: trips,
 // spend, flight/hotel averages, over-budget + weekend flags, per-traveler totals.
 // (TRF/JotForm cross-referencing is a later phase.)
+import { fetchTravelRequests, matchTRF } from './trf';
+
 const NAVAN_BASE = 'https://api.navan.com';
 const TOKEN_URL = `${NAVAN_BASE}/ta-auth/oauth/token`;
 const CID = process.env.NAVAN_CLIENT_ID || '';
@@ -46,6 +48,7 @@ async function fetchBookings(days) {
 
 const amt = (b) => Number(b.usdGrandTotal || b.grandTotal || b.travelSpend || 0);
 const travelerOf = (b) => b.passengers?.[0]?.person?.name || b.booker?.name || '—';
+const travelerEmailOf = (b) => (b.passengers?.[0]?.person?.email || b.booker?.email || '').trim().toLowerCase();
 
 function isWeekend(b) {
   for (const d of [b.startDate, b.endDate]) {
@@ -68,10 +71,17 @@ function flagReasons(b) {
   return r;
 }
 
-export async function travelReview(days = 7) {
+export async function travelReview(days = 7, { withTRF = true } = {}) {
   if (!CID || !CSEC) return { ok: false, count: 0, error: 'Navan credentials not configured' };
   try {
     const bs = await fetchBookings(days);
+    // Travel Request Forms (best-effort; [] when none ingested → flags stay hidden).
+    const trfs = withTRF ? await fetchTravelRequests() : [];
+    const trfConnected = trfs.length > 0;
+    const trfOf = (b) => (trfConnected
+      ? matchTRF({ email: travelerEmailOf(b), name: travelerOf(b), depart: b.startDate, ret: b.endDate }, trfs)
+      : { request_match: null, match_note: null });
+
     const flights = bs.filter((b) => b.bookingType === 'FLIGHT');
     const hotels = bs.filter((b) => b.bookingType === 'HOTEL');
     const totalSpend = bs.reduce((s, b) => s + amt(b), 0);
@@ -82,23 +92,33 @@ export async function travelReview(days = 7) {
     const flagged = bs.map((b) => ({ b, reasons: flagReasons(b) })).filter((x) => x.reasons.length);
     const flaggedSpend = flagged.reduce((s, x) => s + amt(x.b), 0);
 
+    let matchedTRF = 0, missingTRF = 0, approxTRF = 0;
     const tmap = {};
     for (const b of bs) {
       const t = travelerOf(b);
-      const m = tmap[t] || (tmap[t] = { name: t, spend: 0, flights: 0, hotels: 0, flagged: 0 });
+      const m = tmap[t] || (tmap[t] = { name: t, spend: 0, flights: 0, hotels: 0, flagged: 0, missingTRF: 0, approxTRF: 0 });
       m.spend += amt(b);
       if (b.bookingType === 'FLIGHT') m.flights++;
       if (b.bookingType === 'HOTEL') m.hotels++;
       if (flagReasons(b).length) m.flagged++;
+      if (trfConnected) {
+        const tr = trfOf(b);
+        if (tr.request_match === true && tr.match_note) { approxTRF++; m.approxTRF++; }
+        else if (tr.request_match === true) { matchedTRF++; }
+        else if (tr.request_match === false) { missingTRF++; m.missingTRF++; }
+      }
     }
     const travelers = Object.values(tmap).sort((a, b) => b.spend - a.spend);
 
-    const flaggedList = flagged.sort((a, b) => amt(b.b) - amt(a.b)).slice(0, 50).map((x) => ({
-      traveler: travelerOf(x.b), type: x.b.bookingType, vendor: x.b.vendor || '',
-      amount: amt(x.b), startDate: x.b.startDate || '', endDate: x.b.endDate || '',
-      detail: x.b.bookingType === 'FLIGHT' ? (x.b.airlineRoute || x.b.routeType || '') : (x.b.destination || x.b.tripName || ''),
-      reasons: x.reasons,
-    }));
+    const flaggedList = flagged.sort((a, b) => amt(b.b) - amt(a.b)).slice(0, 50).map((x) => {
+      const tr = trfOf(x.b);
+      return {
+        traveler: travelerOf(x.b), type: x.b.bookingType, vendor: x.b.vendor || '',
+        amount: amt(x.b), startDate: x.b.startDate || '', endDate: x.b.endDate || '',
+        detail: x.b.bookingType === 'FLIGHT' ? (x.b.airlineRoute || x.b.routeType || '') : (x.b.destination || x.b.tripName || ''),
+        reasons: x.reasons, request_match: tr.request_match, match_note: tr.match_note,
+      };
+    });
 
     return {
       ok: true, days, count: flagged.length,
@@ -109,6 +129,7 @@ export async function travelReview(days = 7) {
         overBudget: bs.filter(overBudget).length,
         weekend: bs.filter(isWeekend).length,
         flaggedCount: flagged.length, flaggedSpend,
+        trfConnected, matchedTRF, missingTRF, approxTRF,
       },
       travelers, flagged: flaggedList, error: null,
     };
@@ -118,6 +139,6 @@ export async function travelReview(days = 7) {
 }
 
 export async function travelCount(days = 7) {
-  const r = await travelReview(days);
+  const r = await travelReview(days, { withTRF: false });
   return r.ok ? r.count : null;
 }

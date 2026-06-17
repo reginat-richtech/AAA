@@ -36,6 +36,20 @@ export default function ProjectTracker() {
       <section className="panel">
         <div className="panel-title"><h2>Project process tracker</h2><span className="meta">9 stages · red → blue</span></div>
         <StageRail stages={STAGES} counts={data.counts} />
+        <div className="rail-legend">
+          <span><i className="done" /> done</span>
+          <span><i className="next" /> next action</span>
+          <span><i className="ref" /> reference stage</span>
+          <span><i className="pend" /> pending</span>
+          <span className="note">· nodes take each stage's color (1→9 red → blue)</span>
+        </div>
+        <style>{`
+          .rail-legend { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; margin-top:14px; padding-top:12px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--muted); }
+          .rail-legend i { display:inline-block; width:13px; height:13px; border-radius:50%; margin-right:6px; vertical-align:-2px; border:2px solid var(--line); background:#fff; }
+          .rail-legend i.done { background:var(--primary); border-color:var(--primary); }
+          .rail-legend i.next { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.25); }
+          .rail-legend i.ref { border-style:dashed; }
+        `}</style>
       </section>
 
       <div className="toolbar">

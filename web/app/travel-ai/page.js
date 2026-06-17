@@ -46,6 +46,7 @@ export default function TravelAI() {
                 In the last {data.days} days there were <b>{s.trips} trips</b> totaling <b>{money(s.totalSpend)}</b>.
                 {' '}{s.flights.count} flights (avg {money(s.flights.avg)}) and {s.hotels.count} hotel stays (avg {money(s.hotels.avgPerNight)}/night).
                 {' '}{s.overBudget} over budget, {s.weekend} over a weekend.
+                {s.trfConnected && <>{' '}<b>{s.missingTRF}</b> with no matching Travel Request Form.</>}
               </p>
 
               <div className="flag-head">
@@ -62,21 +63,42 @@ export default function TravelAI() {
                       {t.flights > 0 && <span className="tflag" title="flights">✈ {t.flights}</span>}
                       {t.hotels > 0 && <span className="tflag" title="hotel stays">🏨 {t.hotels}</span>}
                       {t.flagged > 0 && <span className="tflag bad" title="flagged bookings">⚑ {t.flagged}</span>}
+                      {t.approxTRF > 0 && <span className="tflag" title="early/late vs Travel Request Form">⏰ {t.approxTRF}</span>}
+                      {t.missingTRF > 0 && <span className="tflag bad" title="no matching Travel Request Form">❌ {t.missingTRF}</span>}
                     </span>
                     <span className="tamt">{money(t.spend)}</span>
                   </div>
                 ))}
               </div>
 
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed var(--line)' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 13, color: 'var(--muted)' }}>
-                  <span><span aria-hidden="true">✈</span> flights</span>
-                  <span><span aria-hidden="true">🏨</span> hotel stays</span>
-                  <span style={{ color: 'var(--bad)' }}><span aria-hidden="true">⚑</span> flagged — needs review</span>
+              <div className="travel-legend">
+                <div className="tl-group">
+                  <span className="tl-h">Booking type</span>
+                  <span className="tl-chip" style={{ background: 'rgba(191,219,254,.92)', borderColor: '#7dd3fc' }}>✈ Flight</span>
+                  <span className="tl-chip" style={{ background: 'rgba(167,243,208,.92)', borderColor: '#6ee7b7' }}>🏨 Hotel</span>
+                  <span className="tl-chip" style={{ background: 'rgba(221,214,254,.92)', borderColor: '#c4b5fd' }}>✈🏨 Flight + Hotel</span>
                 </div>
-                <p className="note" style={{ margin: '6px 0 0' }}>
-                  <b>Flagged</b> = over budget <i>or</i> weekend travel. Budget limits: flights <b>$500</b> round-trip / <b>$250</b> one-way · hotels <b>$200</b>/night.
-                </p>
+                <div className="tl-group">
+                  <span className="tl-h">Flags</span>
+                  <span className="tl-item"><i className="m" style={{ background: 'var(--warn)' }} /> Over budget <span className="tl-sub">flights &gt; $500 RT / $250 OW · hotels &gt; $200/night</span></span>
+                  <span className="tl-item">🚩 Weekend travel <span className="tl-sub">trip starts Sat/Sun</span></span>
+                  <span className="tl-item" style={{ color: 'var(--bad)' }}>⚑ Flagged <span className="tl-sub">over budget or weekend — needs review</span></span>
+                </div>
+                <div className="tl-group">
+                  <span className="tl-h">Travel Request Form <span className="tl-sub" style={{ textTransform: 'none', letterSpacing: 0 }}>· shown when a matching Travel Request Form is found</span></span>
+                  <span className="tl-item">✅ Matched TRF <span className="tl-sub">booking linked to a request form</span></span>
+                  <span className="tl-item">⏰ Early / late flight <span className="tl-sub">within ±2 days of the TRF dates</span></span>
+                  <span className="tl-item">❌ No TRF match <span className="tl-sub">no request form found</span></span>
+                </div>
+                <style>{`
+                  .travel-legend { margin-top:14px; padding-top:12px; border-top:1px dashed var(--line); display:flex; flex-direction:column; gap:10px; }
+                  .tl-group { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; }
+                  .tl-h { font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-right:4px; }
+                  .tl-chip { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:2px 8px; border:1px solid; border-radius:999px; color:var(--ink); }
+                  .tl-item { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; color:var(--ink); }
+                  .tl-item .m { width:10px; height:10px; border-radius:50%; display:inline-block; flex:0 0 auto; }
+                  .tl-sub { color:var(--muted); font-size:11.5px; }
+                `}</style>
               </div>
             </>
           )}
