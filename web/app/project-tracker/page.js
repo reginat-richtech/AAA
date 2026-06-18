@@ -1,17 +1,17 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { PageHeader, StageRail, ProjectRail, STAGES, STAGE_RAMP, hexA } from '../_components/blueprint';
+import { PageHeader, StageRail, ProjectRail, STAGES, STAGE_RAMP } from '../_components/blueprint';
 
 const LEAF_ICON = { done: '✓', pending: '○', manual: '·' };
 
-// Node styling shared by the per-project mini-rail and the expanded tree.
-// `color` is the stage's ramp color so the whole page matches the dashboard.
+// Node dot styling for the expanded tree. Solid fill for done/current, hollow
+// for pending, dashed for reference — no translucent ring (it rendered as a
+// half-cut / double circle at this small size).
 function dotStyle(node, color) {
-  if (node.status === 'done') return { background: color, borderColor: color };
-  if (node.status === 'current') return { borderColor: color, boxShadow: `0 0 0 3px ${hexA(color, 0.3)}` };
-  if (node.status === 'manual') return { borderColor: color, borderStyle: 'dashed' };
-  return {};
+  if (node.status === 'done' || node.status === 'current') return { background: color, borderColor: color };
+  if (node.status === 'manual') return { background: '#fff', borderColor: color, borderStyle: 'dashed' };
+  return { background: '#fff', borderColor: 'var(--line)' };
 }
 
 export default function ProjectTracker() {

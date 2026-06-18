@@ -6,7 +6,9 @@
 // vision step + a valid key — not wired here since the OpenRouter key is dead.
 import { PDFParse } from 'pdf-parse';
 
-const FIELDS_MODEL = process.env.EXTRACT_FIELDS_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1';
+// gpt-4.1-mini is much faster than gpt-4.1 and accurate enough for structured
+// field extraction. Override with EXTRACT_FIELDS_MODEL to trade speed for accuracy.
+const FIELDS_MODEL = process.env.EXTRACT_FIELDS_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 const OPENAI_BASE = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 
 export const AGREEMENT_TYPES = ['RaaS Agreement', 'Event Rental Agreement', 'Full Robot Sale', 'Other'];
@@ -87,27 +89,48 @@ async function extractPdfText(buffer) {
   }
 }
 
-// Stage 2 — gpt-4.1 turns text into structured fields.
+// Cut latency without losing the key terms: contracts front-load parties/dates/
+// term and put pricing + robot schedules in an end exhibit — so send the head and
+// the tail rather than the whole (often very long) document.
+function clipForLLM(text) {
+  const MAX = 28000; // ~7k tokens
+  if (text.length <= MAX) return text;
+  const head = 20000;
+  return `${text.slice(0, head)}\n\n[… middle trimmed for speed …]\n\n${text.slice(-(MAX - head))}`;
+}
+
+// Stage 2 — the LLM turns text into structured fields (with a hard timeout so a
+// slow/hung API call can't leave the UI stuck on "Analyzing…").
 async function extractFields(text) {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error('OPENAI_API_KEY not configured (needed for the gpt-4.1 field step).');
-  const r = await fetch(`${OPENAI_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: FIELDS_MODEL,
-      temperature: 0,
-      max_tokens: 2000,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: `AGREEMENT TEXT:\n"""\n${text.slice(0, 48000)}\n"""` },
-      ],
-      response_format: { type: 'json_schema', json_schema: { name: 'legal_agreement', strict: true, schema: EXTRACTION_SCHEMA } },
-    }),
-  });
-  if (!r.ok) throw new Error(`Field step (OpenAI ${FIELDS_MODEL}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const j = await r.json();
-  return JSON.parse(j.choices?.[0]?.message?.content || '{}');
+  if (!key) throw new Error('OPENAI_API_KEY not configured (needed for the field-extraction step).');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const r = await fetch(`${OPENAI_BASE}/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: FIELDS_MODEL,
+        temperature: 0,
+        max_tokens: 2000,
+        messages: [
+          { role: 'system', content: SYSTEM },
+          { role: 'user', content: `AGREEMENT TEXT:\n"""\n${clipForLLM(text)}\n"""` },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: 'legal_agreement', strict: true, schema: EXTRACTION_SCHEMA } },
+      }),
+    });
+    if (!r.ok) throw new Error(`Field step (OpenAI ${FIELDS_MODEL}) HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const j = await r.json();
+    return JSON.parse(j.choices?.[0]?.message?.content || '{}');
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error(`Field-extraction timed out after 60s (model ${FIELDS_MODEL}). Try again or use a faster model.`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function extractAgreement(pdfBuffer) {
