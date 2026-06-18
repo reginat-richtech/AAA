@@ -4,26 +4,50 @@ import { query } from '../../../../lib/db';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Records a workflow stage event (idempotent on submission_id + stage). Point a
-// JotForm webhook here with ?stage=<name> (e.g. ?stage=travel_requested). The
-// Project Tracker reads these to advance the "Trip & Travel" stage.
-export async function POST(request) {
+// Records a JotForm workflow stage event (idempotent on submission_id + stage).
+// Accepts POST (normal JotForm delivery) AND GET (JotForm "GET" webhooks + the
+// connection test). Point a webhook here with ?stage=<name> (e.g. ?stage=approved);
+// the Project Tracker reads these to advance the "Trip & Travel" stage.
+async function handle(request) {
   const url = new URL(request.url);
-  let body = {};
-  try { body = await request.json(); }
-  catch {
-    try { body = Object.fromEntries(await request.formData()); } catch { body = {}; }
-  }
-  const stage = url.searchParams.get('stage') || body.stage;
-  if (!stage) return NextResponse.json({ error: 'stage is required (?stage=...)' }, { status: 400 });
-  const submission_id = body.submissionID || body.submission_id || body.so_number || null;
-  const form_id = body.formID || body.form_id || null;
+  const q = url.searchParams;
 
-  await query(
-    `insert into ops.jotform_stage_event (form_id, submission_id, stage, payload)
-     values ($1,$2,$3,$4)
-     on conflict (submission_id, stage) do nothing`,
-    [form_id, submission_id, stage, JSON.stringify(body)]
-  );
-  return NextResponse.json({ ok: true });
+  // Optional shared-secret gate: if JOTFORM_WEBHOOK_SECRET is set, require ?token=.
+  const secret = process.env.JOTFORM_WEBHOOK_SECRET;
+  if (secret && q.get('token') !== secret) {
+    return NextResponse.json({ error: 'invalid token' }, { status: 401 });
+  }
+
+  // POST carries the submission in the body; GET carries it on the query string.
+  // Read the body ONCE (reading json() first would consume the stream).
+  let body = {};
+  if (request.method === 'POST') {
+    const ct = request.headers.get('content-type') || '';
+    try { body = ct.includes('application/json') ? await request.json() : Object.fromEntries(await request.formData()); }
+    catch { body = {}; }
+  }
+  const pick = (...keys) => {
+    for (const k of keys) { if (body[k] != null) return body[k]; const v = q.get(k); if (v != null) return v; }
+    return null;
+  };
+
+  const stage = q.get('stage') || body.stage;
+  if (!stage) return NextResponse.json({ error: 'stage is required (?stage=...)' }, { status: 400 });
+
+  const submission_id = pick('submissionID', 'submission_id', 'so_number');
+  const form_id = pick('formID', 'form_id');
+
+  // A bare connection test (no submission) succeeds without writing a junk row.
+  if (submission_id) {
+    const payload = Object.keys(body).length ? body : Object.fromEntries(q);
+    await query(
+      `insert into ops.jotform_stage_event (form_id, submission_id, stage, payload)
+       values ($1,$2,$3,$4) on conflict (submission_id, stage) do nothing`,
+      [form_id, submission_id, stage, JSON.stringify(payload)],
+    );
+  }
+  return NextResponse.json({ ok: true, stage, recorded: !!submission_id });
 }
+
+export const GET = handle;
+export const POST = handle;
