@@ -5,6 +5,8 @@
 // using JOTFORM_API_KEY, then matched to Navan bookings. DEGRADES GRACEFULLY:
 // with no API key / no submissions / a fetch error, fetchTravelRequests()
 // returns [] and the ✅/⏰/❌ flags simply stay hidden.
+import { query } from '../db';
+
 const KEY = process.env.JOTFORM_API_KEY || '';
 
 const PROXIMITY_DAYS = 2;
@@ -65,13 +67,12 @@ export function parseTRF(raw) {
   return { email, name, depart, ret };
 }
 
+// Read TRF submissions from the synced DB (ext.jotform_submission) — no live
+// JotForm call on the request path. Empty table → [] (TRF flags stay hidden).
 export async function fetchTravelRequests() {
-  if (!KEY) return [];
   try {
-    const r = await fetch(`https://api.jotform.com/form/${TRF_FORM_ID}/submissions?limit=500&apiKey=${encodeURIComponent(KEY)}`);
-    if (!r.ok) return [];
-    const subs = (await r.json()).content || [];
-    return subs.map(parseTRF).filter((t) => t.depart || t.ret);
+    const { rows } = await query('select raw from ext.jotform_submission where form_id = $1', [TRF_FORM_ID]);
+    return rows.map((r) => parseTRF(r.raw)).filter((t) => t.depart || t.ret);
   } catch {
     return [];
   }

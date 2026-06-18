@@ -5,9 +5,10 @@ import { ensureExtSchema } from './schema';
 import { syncNavan } from './navan';
 import { syncJotform } from './jotform';
 import { syncQuickbooks } from './quickbooks';
+import { syncHubspot } from './hubspot';
 
-const RUNNERS = { navan: syncNavan, jotform: syncJotform, quickbooks: syncQuickbooks };
-export const ALL_SOURCES = ['navan', 'jotform', 'quickbooks'];
+const RUNNERS = { navan: syncNavan, jotform: syncJotform, quickbooks: syncQuickbooks, hubspot: syncHubspot };
+export const ALL_SOURCES = ['navan', 'jotform', 'quickbooks', 'hubspot'];
 
 export async function runSync(sources) {
   await ensureExtSchema();
@@ -25,7 +26,9 @@ export async function runSync(sources) {
       );
       results.push(r);
     } catch (e) {
-      const msg = String(e?.message || e);
+      const msg = String(e?.message || e)
+        + (e?.detail ? ` :: ${e.detail}` : '')
+        + (e?.where ? ` @ ${e.where}` : '');
       await pool.query('update ext.sync_log set finished_at=now(), ok=false, error=$2 where id=$1', [logId, msg]);
       results.push({ source: src, ok: false, rows: 0, error: msg });
     }
@@ -43,6 +46,7 @@ export async function lastSyncStatus() {
     select 'navan' as source, count(*)::int n from ext.navan_booking
     union all select 'jotform', count(*)::int from ext.jotform_submission
     union all select 'quickbooks', count(*)::int from ext.quickbooks_invoice
+    union all select 'hubspot', count(*)::int from ext.hubspot_deal
   `)).rows;
   return { last, totals: Object.fromEntries(counts.map((r) => [r.source, r.n])) };
 }

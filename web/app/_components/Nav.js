@@ -45,7 +45,7 @@ export default function Nav({ collapsed = false, isAdmin = false }) {
       .then((d) => { if (alive) setCounts(d || {}); })
       .catch(() => {});
     // Warm the AI tab caches so opening any tab or alert detail is instant.
-    prefetchAi(['/api/ai/hubspot', '/api/ai/travel', '/api/ai/finance']);
+    prefetchAi(['/api/ai/hubspot', '/api/ai/travel?days=7', '/api/ai/finance']);
     return () => { alive = false; };
   }, [isAdmin]);
 

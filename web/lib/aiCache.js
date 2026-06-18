@@ -51,6 +51,15 @@ export function getAi(endpoint, { force = false } = {}) {
   return p;
 }
 
+// Write a result into the cache (used after a Refresh/sync re-pull).
+export function setAi(endpoint, data) {
+  if (data && data.ok !== false) {
+    const entry = { at: Date.now(), data };
+    mem.set(endpoint, entry);
+    toSession(endpoint, entry);
+  }
+}
+
 // Fire-and-forget warm the cache for several endpoints (skips ones already fresh).
 export function prefetchAi(endpoints) {
   if (typeof window === 'undefined') return;
