@@ -1,8 +1,9 @@
 // HubSpot activity brief — computed from the DB (ext.hubspot_*), NOT the live API.
 // The data is pulled into Postgres by lib/ingest/hubspot.js (sync job / Option-B
 // Refresh). Cards: (1) new deals this week (2026+), (2) stage moves last 7 days,
-// (3) stalled open deals past close date. Plus email activity by rep (yesterday),
-// with one-line LLM summaries. Reads are cheap DB queries; force bypasses caches.
+// (3) stalled open deals past close date, (4) at-risk deals by composite risk
+// score (see dealRisk). Plus email activity by rep (yesterday), with one-line
+// LLM summaries. Reads are cheap DB queries; force bypasses caches.
 import { query } from '../db';
 import { ensureExtSchema } from '../ingest/schema';
 
@@ -11,6 +12,7 @@ const OPENAI_BASE = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1';
 const DAY = 86400000;
 const YEAR_CUTOFF = Date.parse('2026-01-01T00:00:00Z');
+const HALF_YEAR_MS = 183 * DAY;   // at-risk alerts only consider deals from the last ~6 months
 
 function dayStartMs(offsetDays = 0) {
   const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + offsetDays);
@@ -27,6 +29,36 @@ function stageSeverity(label) {
   if (s.includes('won')) return { sev: 'ok', icon: '🏆' };
   if (s.includes('trial')) return { sev: 'info', icon: '🧪' };
   return { sev: 'warn', icon: '🔄' };
+}
+
+// Composite deal risk score (0–100), ported from the old app's deal_risk model.
+// Deal-property rules only (call-sentiment penalties omitted — no call data here):
+//   inactivity tier (no activity 7/14/30d → +8/18/30, highest tier only),
+//   past-due close +25, closing-soon & quiet +20, stuck in current stage >30d +15.
+// Bands: ≥70 at_risk · ≥40 watch · else healthy. Activity falls back to
+// hs_lastmodifieddate until the ingest re-syncs hs_last_activity_date.
+function dealRisk(d) {
+  const p = d.properties || {};
+  const now = Date.now();
+  const lastAct = tsOf(p.hs_last_activity_date || p.notes_last_contacted || p.hs_lastmodifieddate);
+  const daysQuiet = lastAct ? (now - lastAct) / DAY : null;
+  const close = tsOf(p.closedate);
+  const daysToClose = close ? (close - now) / DAY : null;
+  const entered = Array.isArray(d.hist) && d.hist.length ? tsOf(d.hist[0].timestamp) : null;
+  const daysInStage = entered ? (now - entered) / DAY : null;
+
+  let score = 0; const reasons = [];
+  if (daysQuiet != null) {
+    if (daysQuiet >= 30) { score += 30; reasons.push('no activity 30d+'); }
+    else if (daysQuiet >= 14) { score += 18; reasons.push('no activity 14d+'); }
+    else if (daysQuiet >= 7) { score += 8; reasons.push('no activity 7d+'); }
+  }
+  if (daysToClose != null && daysToClose < 0) { score += 25; reasons.push('past close date'); }
+  else if (daysToClose != null && daysToClose <= 7 && (daysQuiet == null || daysQuiet >= 5)) { score += 20; reasons.push('closing soon & quiet'); }
+  if (daysInStage != null && daysInStage > 30) { score += 15; reasons.push('stuck in stage 30d+'); }
+
+  score = Math.min(100, score);
+  return { score, band: score >= 70 ? 'at_risk' : score >= 40 ? 'watch' : 'healthy', reasons };
 }
 
 async function stageMapDb() {
@@ -79,7 +111,7 @@ async function computeCards() {
     `select id, raw from ext.hubspot_deal
       where createdate   >= now() - interval '8 days'
          or lastmodified >= now() - interval '8 days'
-         or (coalesce(is_closed, false) = false and closedate is not null and closedate < now())`
+         or coalesce(is_closed, false) = false`
   );
   const deals = rows.map((r) => ({ id: r.id, properties: r.raw?.properties || {}, hist: r.raw?.stageHistory || [] }));
 
@@ -161,10 +193,43 @@ async function computeCards() {
     });
   }
 
+  // 4 — at-risk deals (composite risk score). Scope: open deals created within
+  // the last half-year only (ignore old lingering deals we no longer chase).
+  const halfYearAgo = Date.now() - HALF_YEAR_MS;
+  const scored = deals
+    .filter((d) => d.properties.hs_is_closed !== 'true')
+    .filter((d) => tsOf(d.properties.createdate) >= halfYearAgo)
+    .map((d) => ({ d, r: dealRisk(d) }))
+    .filter((x) => x.r.score >= 40)
+    .sort((a, b) => b.r.score - a.r.score);
+  const atRiskN = scored.filter((x) => x.r.score >= 70).length;
+  const highValueN = scored.filter((x) => x.r.score >= 70 && Number(x.d.properties.amount) >= 5000).length;
+  if (scored.length) {
+    const top = scored.slice(0, 3).map((x) => {
+      const p = x.d.properties; const m = fmtMoney(p.amount);
+      return (p.dealname || 'deal') + (m ? ` · ${m}` : '') + ` · risk ${x.r.score}`;
+    });
+    cards.push({
+      id: 'at_risk', sev: atRiskN ? 'fail' : 'warn', icon: '⚠️',
+      title: atRiskN
+        ? `${atRiskN} Deal${atRiskN !== 1 ? 's' : ''} At Risk${scored.length > atRiskN ? ` · ${scored.length - atRiskN} to watch` : ''}`
+        : `${scored.length} Deal${scored.length !== 1 ? 's' : ''} to Watch`,
+      msg: top.join(', ') + (scored.length > 3 ? ` +${scored.length - 3} more` : ''),
+      rec: highValueN ? `${highValueN} high-value (≥$5k) — prioritize re-engagement` : 'Re-engage or update stalled deals',
+      detail: {
+        kind: 'deals', total: scored.length,
+        deals: scored.map((x) => {
+          const p = x.d.properties;
+          return { id: x.d.id, name: p.dealname || `Deal #${x.d.id}`, amount: fmtMoney(p.amount) || '—', stage: stageMap[p.dealstage] || p.dealstage || '—', close: (p.closedate || '').slice(0, 10), score: x.r.score, band: x.r.band, reasons: x.r.reasons.join(', ') || '—', highValue: Number(p.amount) >= 5000 };
+        }),
+      },
+    });
+  }
+
   const rank = { fail: 0, warn: 1, info: 2, ok: 3 };
   cards.sort((a, b) => rank[a.sev] - rank[b.sev]);
 
-  return { ok: true, count: cards.length, cards, brief: { newDeals: newDeals.length, stageMoves, overdue: overdue.length }, error: null };
+  return { ok: true, count: cards.length, cards, brief: { newDeals: newDeals.length, stageMoves, overdue: overdue.length, atRisk: atRiskN, watch: scored.length - atRiskN }, error: null };
 }
 
 // Email activity by PM — outbound emails sent yesterday, from ext.hubspot_engagement.

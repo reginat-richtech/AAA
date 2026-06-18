@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '../_components/blueprint';
 
 const SOURCES = [
+  { key: 'hubspot', label: 'HubSpot deals' },
   { key: 'navan', label: 'Navan bookings' },
   { key: 'jotform', label: 'JotForm submissions' },
   { key: 'quickbooks', label: 'QuickBooks invoices' },
