@@ -4,7 +4,7 @@
 // No vision/OCR API needed for text-based PDFs (which is the common case and
 // exactly the old app's text-parser fallback). Scanned/image PDFs would need a
 // vision step + a valid key — not wired here since the OpenRouter key is dead.
-import { PDFParse } from 'pdf-parse';
+import { extractText, getDocumentProxy } from 'unpdf';
 
 // gpt-4.1-mini is much faster than gpt-4.1 and accurate enough for structured
 // field extraction. Override with EXTRACT_FIELDS_MODEL to trade speed for accuracy.
@@ -78,15 +78,13 @@ Rules:
 - Use "" for unknown text fields, null for unknown dates/numbers. Do not invent values.
 - "summary" is 2-3 plain-English sentences.`;
 
-// Stage 1 — local PDF text extraction (the old app's pypdf path).
+// Stage 1 — local PDF text extraction via unpdf (a Node/serverless-safe pdf.js
+// build). The container's Node runtime has no DOMMatrix/canvas, which the old
+// pdf-parse path required — that's what made uploads hang. unpdf needs neither.
 async function extractPdfText(buffer) {
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
-  try {
-    const result = await parser.getText();
-    return (result.text || '').replace(/\x00/g, '').trim();
-  } finally {
-    try { await parser.destroy?.(); } catch {}
-  }
+  const pdf = await getDocumentProxy(new Uint8Array(buffer));
+  const { text } = await extractText(pdf, { mergePages: true });
+  return String(text || '').replace(/\x00/g, '').trim();
 }
 
 // Cut latency without losing the key terms: contracts front-load parties/dates/

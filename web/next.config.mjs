@@ -2,8 +2,9 @@
 const nextConfig = {
   // Standalone output → a small, self-contained server bundle for the container image.
   output: 'standalone',
-  // Keep the native 'pg' driver out of the server bundle (it must run on Node).
-  serverExternalPackages: ['pg', 'pdf-parse'],
+  // Keep these out of the server bundle: native 'pg' driver, and 'unpdf' (its
+  // bundled pdf.js shouldn't be re-bundled/mangled by webpack).
+  serverExternalPackages: ['pg', 'unpdf'],
 };
 
 export default nextConfig;
