@@ -1,38 +1,36 @@
-// Full-history QuickBooks invoices → ext.quickbooks_invoice. DORMANT until a
-// refresh token + realm id are present (the old app stored these in its DB, not
-// env). Built and ready: refreshes an access token, then pages the Invoice query.
+// Full-history QuickBooks invoices → ext.quickbooks_invoice. Uses the credential
+// stored by the Connect-QuickBooks OAuth flow (ext.integration_credential), with
+// an env fallback. Refreshes an access token, persists Intuit's rotated refresh
+// token, then pages the Invoice query.
 import { ensureExtSchema, upsertBatch, num } from './schema';
+import { qbConfigured, getQbCredential, refreshAccessToken, saveQbCredential, qbApiBase } from '../integrations/qbAuth';
 
-const CID = process.env.QUICKBOOKS_CLIENT_ID || '';
-const CSEC = process.env.QUICKBOOKS_CLIENT_SECRET || '';
-const RT = process.env.QUICKBOOKS_REFRESH_TOKEN || '';
-const REALM = process.env.QUICKBOOKS_REALM_ID || '';
-const ENV = process.env.QUICKBOOKS_ENVIRONMENT || 'production';
 const COLS = ['id', 'doc_number', 'customer', 'txn_date', 'due_date', 'total_amount', 'balance', 'currency', 'status', 'raw'];
 
 export async function syncQuickbooks() {
-  if (!CID || !CSEC || !RT || !REALM) {
-    return { source: 'quickbooks', ok: false, rows: 0, skipped: 'QuickBooks not connected — needs refresh token + realm id' };
+  if (!qbConfigured()) {
+    return { source: 'quickbooks', ok: false, rows: 0, skipped: 'QUICKBOOKS_CLIENT_ID/SECRET not configured' };
   }
   await ensureExtSchema();
+  const cred = await getQbCredential();
+  if (!cred) {
+    return { source: 'quickbooks', ok: false, rows: 0, skipped: 'QuickBooks not connected — use "Connect QuickBooks"' };
+  }
 
-  // Refresh access token (NOTE: Intuit rotates the refresh token on use; persist
-  // tj.refresh_token to your credential store if you keep one).
-  const basic = Buffer.from(`${CID}:${CSEC}`).toString('base64');
-  const tr = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
-    method: 'POST',
-    headers: { Authorization: `Basic ${basic}`, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: RT }),
-  });
-  if (!tr.ok) throw new Error(`QuickBooks refresh ${tr.status}`);
-  const at = (await tr.json()).access_token;
+  // Refresh the access token; persist the rotated refresh token if Intuit gave a new one.
+  const tok = await refreshAccessToken(cred.refresh_token);
+  const at = tok.access_token;
+  if (tok.refresh_token && tok.refresh_token !== cred.refresh_token) {
+    await saveQbCredential({ refresh_token: tok.refresh_token, realm_id: cred.realm_id, environment: cred.environment, company_name: cred.company_name });
+  }
 
-  const base = ENV === 'production' ? 'https://quickbooks.api.intuit.com' : 'https://sandbox-quickbooks.api.intuit.com';
+  const base = qbApiBase(cred.environment);
+  const realm = cred.realm_id;
   const PAGE = 1000;
   let total = 0, start = 1;
   for (let i = 0; i < 200; i++) {
     const q = encodeURIComponent(`SELECT * FROM Invoice STARTPOSITION ${start} MAXRESULTS ${PAGE}`);
-    const r = await fetch(`${base}/v3/company/${REALM}/query?query=${q}&minorversion=65`,
+    const r = await fetch(`${base}/v3/company/${realm}/query?query=${q}&minorversion=65`,
       { headers: { Authorization: `Bearer ${at}`, Accept: 'application/json' } });
     if (!r.ok) throw new Error(`QuickBooks query ${r.status}`);
     const invoices = (await r.json()).QueryResponse?.Invoice || [];

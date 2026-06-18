@@ -14,7 +14,12 @@ function renderLeft(data) {
   const b = data.brief || {};
   const aging = data.aging || [];
   const cards = data.cards || [];
-  if (!b.invoices) return <p className="note">No QuickBooks invoices synced yet — add credentials and run the sync to populate this.</p>;
+  if (!b.invoices) return (
+    <div>
+      <p className="note" style={{ marginTop: 0 }}>No QuickBooks invoices yet. Connect your QuickBooks company, then run a sync.</p>
+      <a className="btnlink" href="/api/quickbooks/connect">Connect QuickBooks</a>
+    </div>
+  );
   return (
     <>
       <p className="note" style={{ marginTop: 0 }}>

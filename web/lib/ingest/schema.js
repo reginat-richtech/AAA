@@ -102,6 +102,15 @@ export async function ensureExtSchema() {
       synced_at     timestamptz not null default now()
     );
 
+    create table if not exists ext.integration_credential (
+      provider      text primary key,
+      refresh_token text,
+      realm_id      text,
+      environment   text,
+      company_name  text,
+      updated_at    timestamptz not null default now()
+    );
+
     create table if not exists ext.sync_log (
       id          bigserial primary key,
       source      text not null,
