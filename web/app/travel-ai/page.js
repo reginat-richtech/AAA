@@ -58,6 +58,7 @@ export default function TravelAI() {
 
   const s = data && data.ok !== false ? data.summary : null;
   const travelers = (data && data.travelers) || [];
+  const today = new Date().toISOString().slice(0, 10); // trips with start_date ≤ today = past (green), else future (blue)
 
   return (
     <>
@@ -112,7 +113,7 @@ export default function TravelAI() {
                       {isOpen && (
                         <div className="trv-trips">
                           {t.trips.map((tr) => (
-                            <button className="trv-trip" key={tr.id} onClick={() => setDetail(tr)} title="View trip detail">
+                            <button className={`trv-trip ${tr.startDate ? (tr.startDate <= today ? 'past' : 'future') : ''}`} key={tr.id} onClick={() => setDetail(tr)} title={tr.startDate && tr.startDate > today ? 'Upcoming trip' : 'Already traveled'}>
                               <span className="trv-type">{typeIcon(tr.type)}</span>
                               <span className="trv-route">
                                 <span className="trv-dest">{tr.route}</span>
@@ -138,6 +139,10 @@ export default function TravelAI() {
                   <span className="tlg-i">✅ Matched TRF</span>
                   <span className="tlg-i">⏰ Early / late flight</span>
                   <span className="tlg-i">❌ No TRF match</span>
+                </div>
+                <div className="tlg"><span className="tlg-h">Timing</span>
+                  <span className="tlg-i"><b style={{ color: 'var(--ok)' }}>● green</b> = already traveled</span>
+                  <span className="tlg-i"><b style={{ color: 'var(--info)' }}>● blue</b> = upcoming</span>
                 </div>
                 <p className="note" style={{ margin: '2px 0 0', fontSize: 11.5 }}>
                   Flight &gt; $500 round-trip / $250 one-way · Hotel &gt; $200/night · TRF = Travel Request Form (JotForm){data.trfConnected ? '' : ' — not connected, so ✅/⏰/❌ are hidden'}
@@ -204,8 +209,12 @@ export default function TravelAI() {
         .pf { font-family:var(--font-mono); font-size:11px; font-weight:700; padding:1px 6px; border-radius:6px; border:1px solid var(--line); background:var(--chip); white-space:nowrap; }
         .trv-total { font-family:var(--font-mono); font-weight:700; font-size:13px; color:var(--primary); min-width:72px; text-align:right; flex:0 0 auto; }
         .trv-trips { border-top:1px solid var(--line); padding:6px; display:flex; flex-direction:column; gap:5px; background:var(--bg); }
-        .trv-trip { display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border:1px solid var(--line); border-left:3px solid var(--warn); border-radius:8px; background:var(--surface); cursor:pointer; text-align:left; color:var(--ink); font:inherit; }
-        .trv-trip:hover { border-color:var(--primary); }
+        .trv-trip { display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border:1px solid var(--line); border-left:3px solid var(--line); border-radius:8px; background:var(--surface); cursor:pointer; text-align:left; color:var(--ink); font:inherit; }
+        .trv-trip.past   { border-left-color:var(--ok);   background:#f0fdf4; }   /* already traveled → green */
+        .trv-trip.past:hover { background:#dcfce7; }
+        .trv-trip.future { border-left-color:var(--info); background:#eff6ff; }   /* upcoming → blue */
+        .trv-trip.future:hover { background:#dbeafe; }
+        .trv-trip:hover { border-top-color:var(--primary); border-right-color:var(--primary); border-bottom-color:var(--primary); }
         .trv-type { font-size:14px; flex:0 0 auto; }
         .trv-route { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
         .trv-dest { font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
