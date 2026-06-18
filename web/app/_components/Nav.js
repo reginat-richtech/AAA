@@ -30,6 +30,7 @@ function Icon({ name }) {
     case 'plane': return (<svg {...p}><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>);
     case 'database': return (<svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 5v6c0 1.66-4 3-9 3s-9-1.34-9-3V5" /><path d="M21 11v8c0 1.66-4 3-9 3s-9-1.34-9-3v-8" /></svg>);
     case 'sync': return (<svg {...p}><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>);
+    case 'shield': return (<svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>);
     default: return null;
   }
 }
@@ -77,6 +78,7 @@ export default function Nav({ collapsed = false, isAdmin = false }) {
           <div className="nav-sep"><span className="nav-lbl">Admin</span></div>
           {renderLink({ href: '/database', label: 'Database', icon: 'database' })}
           {renderLink({ href: '/data-sync', label: 'Data Sync', icon: 'sync' })}
+          {renderLink({ href: '/users', label: 'Users', icon: 'shield' })}
           <div className="nav-sep"><span className="nav-lbl">AI Agents</span></div>
           {AI.map(renderLink)}
         </>

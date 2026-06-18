@@ -4,7 +4,12 @@
 // once and is enforced server-side in every data route.
 import { NextResponse } from 'next/server';
 import { auth } from '../auth';
+import { query } from './db';
+import { ensureExtSchema } from './ingest/schema';
 
+// Bootstrap admins from env — these can never be locked out, even if the DB
+// table is empty/unavailable. Additional admins are managed in ext.app_user
+// via the Users page (/users) and take effect on the user's next request.
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'regina.t@richtechsystem.com')
   .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
 
@@ -12,12 +17,44 @@ export function isAdminEmail(email) {
   return ADMIN_EMAILS.includes(String(email || '').toLowerCase());
 }
 
+// Admin if listed in env (bootstrap) OR ext.app_user(role='admin').
+export async function isAdmin(email) {
+  if (!email) return false;
+  if (isAdminEmail(email)) return true;
+  try {
+    const { rows } = await query(
+      `select 1 from ext.app_user where lower(email) = lower($1) and role = 'admin' limit 1`,
+      [email],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;   // table not created yet → env admins only
+  }
+}
+
 // Resolve the signed-in user for a route. Returns null when unauthenticated.
 export async function currentUser() {
   const session = await auth();
   const email = session?.user?.email?.toLowerCase();
   if (!email) return null;
-  return { email, name: session.user.name || email, isAdmin: isAdminEmail(email) };
+  return { email, name: session.user.name || email, isAdmin: await isAdmin(email) };
+}
+
+// Record a signed-in user (refreshing last_seen) so admins can see everyone on
+// the Users page. New users default to role 'user'; an existing role is kept.
+export async function touchUser(email, name) {
+  const e = String(email || '').toLowerCase();
+  if (!e) return;
+  try {
+    await ensureExtSchema();
+    await query(
+      `insert into ext.app_user (email, role, name, last_seen, updated_at)
+       values ($1, 'user', $2, now(), now())
+       on conflict (email) do update set
+         name = coalesce(excluded.name, ext.app_user.name), last_seen = now()`,
+      [e, name || null],
+    );
+  } catch { /* never block page render */ }
 }
 
 // Guard for the top of an API route: returns { user } or { response } (401).

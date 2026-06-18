@@ -111,6 +111,16 @@ export async function ensureExtSchema() {
       updated_at    timestamptz not null default now()
     );
 
+    create table if not exists ext.app_user (
+      email      text primary key,
+      role       text not null default 'user',   -- 'admin' | 'user'
+      name       text,
+      added_by   text,
+      last_seen  timestamptz,
+      updated_at timestamptz not null default now()
+    );
+    alter table ext.app_user add column if not exists last_seen timestamptz;
+
     create table if not exists ext.sync_log (
       id          bigserial primary key,
       source      text not null,
