@@ -1,8 +1,9 @@
 // Navan Travel Expense Review — computed from the DB (ext.navan_booking), modeled
-// on the old app's /travel/dashboard. Bookings are grouped into TRIPS (a traveler's
-// flight + hotel for the same Navan tripUuid become one "FLIGHT + HOTEL" trip), each
-// trip carries flags (over budget 🔴, weekend 🚩, early/late ⏰, matched ✅, no-TRF ❌),
-// and the "needs review" trips are grouped per traveler for the clickable UI.
+// on the old app's /travel/dashboard. Bookings are cleaned (drop $0/cancelled),
+// grouped into TRIPS (flight + hotel → one "FLIGHT + HOTEL" trip, via Navan
+// tripUuid or a ±1-day pairing fallback), flagged (over budget 🔴, weekend 🚩,
+// early/late ⏰, matched ✅, no-TRF ❌), and the "needs review" trips are grouped
+// per traveler for the clickable UI. Round-trip return legs inherit a TRF match.
 import { query } from '../db';
 import { fetchTravelRequests, matchTRF } from './trf';
 
@@ -10,12 +11,22 @@ import { fetchTravelRequests, matchTRF } from './trf';
 const FLIGHT_RT_MAX = 500;   // round-trip
 const FLIGHT_OW_MAX = 250;   // one-way
 const HOTEL_NIGHT_MAX = 200; // per night
+const DAY_MS = 86400000;
 
-// Smart window (matches the old app's _smart_include): include a booking if it
-// TRAVELED within the last `days` (past/today → by start_date), OR it's a future/
-// undated trip that was BOOKED within the last `days` (→ by created_at). This
-// catches trips booked earlier whose travel falls inside the window, plus
-// recently-booked upcoming trips.
+// Amount cascade (matches the old app's normalize_booking).
+const amt = (b) => Number(b.usdGrandTotal || b.grandTotal || b.totalCost || b.totalAmount || b.travelSpend || b.cost || 0);
+const travelerOf = (b) => b.passengers?.[0]?.person?.name || b.booker?.name || '—';
+const travelerEmailOf = (b) => (b.passengers?.[0]?.person?.email || b.booker?.email || '').trim().toLowerCase();
+// Navan origin/destination are objects ({city,state,airportCode,...}); show the city.
+const placeName = (o) => (!o ? '' : typeof o === 'string' ? o : (o.city || o.airportCode || o.name || ''));
+const dateMs = (s) => (s ? new Date(s + 'T00:00:00Z').getTime() : NaN);
+const isWeekendDate = (d) => { if (!d) return false; const g = new Date(d + 'T00:00:00Z').getUTCDay(); return g === 0 || g === 6; };
+const flightOverBudget = (b) => amt(b) > (/round/i.test(b.routeType || '') ? FLIGHT_RT_MAX : FLIGHT_OW_MAX);
+const hotelOverBudget = (b) => amt(b) / (b.bookingDuration || 1) > HOTEL_NIGHT_MAX;
+
+// Smart window (old app's _smart_include): include a booking if it TRAVELED within
+// the last `days` (past/today → by start_date), OR it's a future/undated trip
+// BOOKED within the last `days` (→ by created_at).
 async function fetchBookings(days) {
   const { rows } = await query(
     `select raw from ext.navan_booking
@@ -23,29 +34,47 @@ async function fetchBookings(days) {
           or ((start_date is null or start_date > current_date) and created_at >= now() - ($1::int * interval '1 day'))`,
     [String(days)],
   );
-  return rows.map((r) => r.raw).filter((b) => b && b.bookingStatus !== 'CANCELLED' && !b.cancelledAt);
+  // Drop cancelled and $0 bookings before grouping (so junk doesn't steal pairing slots).
+  return rows.map((r) => r.raw).filter((b) =>
+    b && !/cancel/i.test(b.bookingStatus || '') && !b.cancelledAt && amt(b) > 0);
 }
 
-const amt = (b) => Number(b.usdGrandTotal || b.grandTotal || b.travelSpend || 0);
-const travelerOf = (b) => b.passengers?.[0]?.person?.name || b.booker?.name || '—';
-const travelerEmailOf = (b) => (b.passengers?.[0]?.person?.email || b.booker?.email || '').trim().toLowerCase();
-// Navan origin/destination are objects ({city,state,airportCode,...}); show the city.
-const placeName = (o) => (!o ? '' : typeof o === 'string' ? o : (o.city || o.airportCode || o.name || ''));
-const isWeekendDate = (d) => { if (!d) return false; const g = new Date(d + 'T00:00:00Z').getUTCDay(); return g === 0 || g === 6; };
-const flightOverBudget = (b) => amt(b) > (/round/i.test(b.routeType || '') ? FLIGHT_RT_MAX : FLIGHT_OW_MAX);
-const hotelOverBudget = (b) => amt(b) / (b.bookingDuration || 1) > HOTEL_NIGHT_MAX;
-
-// Group a window's bookings into trips (per traveler + Navan tripUuid; solo otherwise),
-// resolve flags + TRF match per trip.
 function buildTrips(bs, trfs, trfConnected) {
-  const groups = {};
+  // 1) cluster by traveler + Navan tripUuid (solo otherwise)
+  const clusterMap = {};
   for (const b of bs) {
     const key = travelerOf(b) + '||' + ((b.tripUuids && b.tripUuids[0]) || ('solo:' + (b.uuid || b.bookingId || '')));
-    (groups[key] = groups[key] || []).push(b);
+    (clusterMap[key] = clusterMap[key] || []).push(b);
   }
+  let clusters = Object.values(clusterMap);
 
+  // 2) ±1-day pairing fallback: merge an unpaired pure-FLIGHT cluster with a
+  //    pure-HOTEL cluster for the same traveler whose start dates are ≤ 1 day apart
+  //    (catches flight+hotel that Navan didn't link via tripUuid).
+  const onlyType = (items, t) => items.length > 0 && items.every((b) => b.bookingType === t);
+  const byTraveler = {};
+  for (const c of clusters) { const t = travelerOf(c[0]); (byTraveler[t] = byTraveler[t] || []).push(c); }
+  const merged = new Set();
+  const paired = [];
+  for (const list of Object.values(byTraveler)) {
+    const flights = list.filter((c) => onlyType(c, 'FLIGHT'));
+    const hotels = list.filter((c) => onlyType(c, 'HOTEL'));
+    for (const f of flights) {
+      if (merged.has(f)) continue;
+      let best = null, bestGap = 1.0001;
+      for (const h of hotels) {
+        if (merged.has(h)) continue;
+        const gap = Math.abs(dateMs(f[0].startDate) - dateMs(h[0].startDate)) / DAY_MS;
+        if (gap <= 1 && gap < bestGap) { best = h; bestGap = gap; }
+      }
+      if (best) { merged.add(f); merged.add(best); paired.push([...f, ...best]); }
+    }
+  }
+  clusters = clusters.filter((c) => !merged.has(c)).concat(paired);
+
+  // 3) compute one trip per cluster
   const trips = [];
-  for (const [key, items] of Object.entries(groups)) {
+  for (const items of clusters) {
     const traveler = travelerOf(items[0]);
     const email = travelerEmailOf(items[0]);
     const flightsIn = items.filter((b) => b.bookingType === 'FLIGHT');
@@ -77,18 +106,40 @@ function buildTrips(bs, trfs, trfConnected) {
     const m = trfConnected
       ? matchTRF({ email, name: traveler, depart: startDate, ret: endDate }, trfs)
       : { request_match: null, match_note: null };
-    const matchedTRF = m.request_match === true && !m.match_note;
-    const earlyLate = m.request_match === true && !!m.match_note;
-    const noTRF = trfConnected && m.request_match === false;
 
     trips.push({
-      id: key, traveler, email, type, route, origin, destination, vendor: ref.vendor || items[0].vendor || '',
+      id: items.map((b) => b.uuid || b.bookingId).join('+') || `${traveler}|${startDate}`,
+      traveler, email, type, route, origin, destination, vendor: ref.vendor || items[0].vendor || '',
       amount, flightAmount, hotelAmount, startDate, endDate, dailyRate, tripType, matchNote: m.match_note || '',
-      flags: { overBudget, weekend, earlyLate, matchedTRF, noTRF },
-      needsReview: overBudget || weekend || noTRF,
+      flags: {
+        overBudget, weekend,
+        earlyLate: m.request_match === true && !!m.match_note,
+        matchedTRF: m.request_match === true && !m.match_note,
+        noTRF: trfConnected && m.request_match === false,
+      },
+      needsReview: overBudget || weekend || (trfConnected && m.request_match === false),
     });
   }
   return trips;
+}
+
+// Round-trip propagation: an unmatched flight inherits a TRF match from the same
+// traveler's reverse-route matched flight within 21 days (old app behavior).
+function propagateRoundTrip(trips) {
+  const isFlight = (t) => t.type === 'FLIGHT' || t.type === 'FLIGHT + HOTEL';
+  const matched = trips.filter((t) => isFlight(t) && (t.flags.matchedTRF || t.flags.earlyLate) && t.origin && t.destination);
+  for (const t of trips) {
+    if (!t.flags.noTRF || !isFlight(t) || !t.origin || !t.destination) continue;
+    const rev = matched.find((o) => o.traveler === t.traveler
+      && o.origin === t.destination && o.destination === t.origin
+      && Math.abs(dateMs(t.startDate) - dateMs(o.startDate)) / DAY_MS <= 21);
+    if (rev) {
+      t.flags.noTRF = false;
+      t.flags.matchedTRF = true;
+      t.matchNote = t.matchNote || 'Round-trip match';
+      t.needsReview = t.flags.overBudget || t.flags.weekend;
+    }
+  }
 }
 
 export async function travelReview(days = 7, { withTRF = true } = {}) {
@@ -97,6 +148,7 @@ export async function travelReview(days = 7, { withTRF = true } = {}) {
     const trfs = withTRF ? await fetchTravelRequests() : [];
     const trfConnected = trfs.length > 0;
     const trips = buildTrips(bs, trfs, trfConnected);
+    if (trfConnected) propagateRoundTrip(trips);
 
     // Overall stats (every booking in the window).
     const flights = bs.filter((b) => b.bookingType === 'FLIGHT');
