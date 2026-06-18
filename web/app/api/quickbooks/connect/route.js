@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '../../../../lib/access';
-import { qbConfigured, buildAuthorizeUrl } from '../../../../lib/integrations/qbAuth';
+import { qbConfigured, buildAuthorizeUrl, qbRedirectUri } from '../../../../lib/integrations/qbAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,12 +13,11 @@ export async function GET(req) {
   if (!qbConfigured()) {
     return NextResponse.json({ error: 'QUICKBOOKS_CLIENT_ID / QUICKBOOKS_CLIENT_SECRET are not set.' }, { status: 400 });
   }
-  const origin = new URL(req.url).origin;
-  const redirectUri = `${origin}/api/quickbooks/callback`;
+  const redirectUri = qbRedirectUri(req.url);
   const state = crypto.randomUUID();
   const res = NextResponse.redirect(buildAuthorizeUrl(redirectUri, state));
   res.cookies.set('qb_oauth_state', state, {
-    httpOnly: true, sameSite: 'lax', secure: origin.startsWith('https'), path: '/', maxAge: 600,
+    httpOnly: true, sameSite: 'lax', secure: redirectUri.startsWith('https'), path: '/', maxAge: 600,
   });
   return res;
 }

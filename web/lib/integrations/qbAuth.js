@@ -19,6 +19,15 @@ export function qbApiBase(env = ENVIRONMENT) {
   return env === 'production' ? 'https://quickbooks.api.intuit.com' : 'https://sandbox-quickbooks.api.intuit.com';
 }
 
+// Deterministic OAuth redirect URI. Behind the Container Apps proxy, req.url can
+// resolve to http:// or an internal host, so prefer the canonical public URL
+// (AUTH_URL) and only fall back to the request origin for local dev.
+export function qbRedirectUri(reqUrl) {
+  const base = (process.env.QUICKBOOKS_REDIRECT_BASE || process.env.AUTH_URL || '').replace(/\/+$/, '');
+  if (base) return `${base}/api/quickbooks/callback`;
+  try { return `${new URL(reqUrl).origin}/api/quickbooks/callback`; } catch { return '/api/quickbooks/callback'; }
+}
+
 export function buildAuthorizeUrl(redirectUri, state) {
   const p = new URLSearchParams({ client_id: CID, scope: SCOPES, redirect_uri: redirectUri, response_type: 'code', state });
   return `${AUTHORIZE_URL}?${p.toString()}`;

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { exchangeCode, saveQbCredential, qbApiBase, qbEnvironment } from '../../../../lib/integrations/qbAuth';
+import { exchangeCode, saveQbCredential, qbApiBase, qbEnvironment, qbRedirectUri } from '../../../../lib/integrations/qbAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,7 +30,7 @@ export async function GET(req) {
     return page(false, 'Security check failed (state mismatch). Start again from Finance AI.');
   }
 
-  const redirectUri = `${u.origin}/api/quickbooks/callback`;
+  const redirectUri = qbRedirectUri(req.url);
   try {
     const tok = await exchangeCode(code, redirectUri);
     if (!tok.refresh_token) return page(false, 'QuickBooks did not return a refresh token.');
