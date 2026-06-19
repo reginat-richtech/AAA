@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../lib/db';
+import { getJotformSubmission } from '../../../../lib/jotform';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,23 @@ async function handle(request) {
   // A bare connection test (no submission) succeeds without writing a junk row.
   if (submission_id) {
     const payload = Object.keys(body).length ? body : Object.fromEntries(q);
+    // Travel Request Form approval (?stage=travel…): the Project Tracker matches
+    // it to a project by SO number, which the delivery doesn't carry. An explicit
+    // ?so_number= wins; otherwise read it back off the submission (field "soOr"),
+    // mirroring the tech-confirmation webhook's auto-capture and the old app.
+    if (String(stage).startsWith('travel') && !payload.so_number) {
+      const explicit = pick('so_number', 'soOr', 'so');
+      if (explicit) {
+        payload.so_number = String(explicit);
+      } else {
+        const f = await getJotformSubmission(submission_id);
+        if (f.ok) {
+          for (const a of Object.values(f.answers || {})) {
+            if (a && a.name === 'soOr' && String(a.answer || '').trim()) { payload.so_number = String(a.answer).trim(); break; }
+          }
+        }
+      }
+    }
     await query(
       `insert into ops.jotform_stage_event (form_id, submission_id, stage, payload)
        values ($1,$2,$3,$4) on conflict (submission_id, stage) do nothing`,
