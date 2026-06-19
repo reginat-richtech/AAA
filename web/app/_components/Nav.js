@@ -6,6 +6,7 @@ import { prefetchAi } from '../../lib/aiCache';
 
 const WORKFLOW = [
   { href: '/project-tracker', label: 'Project Tracker', icon: 'list' },
+  { href: '/social', label: 'Social Media', icon: 'share' },
   // Data Upload and Tech Request are intentionally hidden from the nav — their
   // pages still work: /data-upload directly, and /tech-request is opened per
   // project from the Project Tracker ("Tech Request ↗").
@@ -31,6 +32,7 @@ function Icon({ name }) {
     case 'database': return (<svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 5v6c0 1.66-4 3-9 3s-9-1.34-9-3V5" /><path d="M21 11v8c0 1.66-4 3-9 3s-9-1.34-9-3v-8" /></svg>);
     case 'sync': return (<svg {...p}><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>);
     case 'shield': return (<svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>);
+    case 'share': return (<svg {...p}><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>);
     default: return null;
   }
 }

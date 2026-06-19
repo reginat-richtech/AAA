@@ -121,6 +121,41 @@ export async function ensureExtSchema() {
     );
     alter table ext.app_user add column if not exists last_seen timestamptz;
 
+    create table if not exists ext.social_post (
+      id             text primary key,
+      platform       text not null default 'x',
+      author_email   text not null,
+      author_name    text,
+      content        text not null default '',
+      image_url      text,
+      title          text,                            -- Reddit: post title
+      subreddit      text,                            -- Reddit: target subreddit (no leading r/)
+      scheduled_at   timestamptz,
+      status         text not null default 'draft',   -- draft | submitted | approved | rejected | published
+      reviewer_email text,
+      reviewer_note  text,
+      published_at   timestamptz,
+      x_post_id      text,
+      created_at     timestamptz not null default now(),
+      updated_at     timestamptz not null default now()
+    );
+    create index if not exists social_post_author_idx on ext.social_post (author_email, created_at desc);
+    create index if not exists social_post_status_idx on ext.social_post (status, scheduled_at);
+    alter table ext.social_post add column if not exists title text;
+    alter table ext.social_post add column if not exists subreddit text;
+
+    create table if not exists ext.social_media (
+      id           text primary key,
+      post_id      text not null,
+      kind         text,                -- 'image' | 'video'
+      content_type text,
+      filename     text,
+      bytes        bytea not null,
+      size         integer,
+      created_at   timestamptz not null default now()
+    );
+    create index if not exists social_media_post_idx on ext.social_media (post_id, created_at);
+
     create table if not exists ext.sync_log (
       id          bigserial primary key,
       source      text not null,
