@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server';
 import { requireUser } from '../../../../../lib/access';
 import { query } from '../../../../../lib/db';
 import { publishToX } from '../../../../../lib/integrations/x';
-import { publishToReddit } from '../../../../../lib/integrations/reddit';
+import { publishToFacebook } from '../../../../../lib/integrations/facebook';
+import { publishToLinkedin } from '../../../../../lib/integrations/linkedin';
+import { publishToInstagram } from '../../../../../lib/integrations/instagram';
+import { capFor } from '../../../../../lib/socialPlatforms';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const COLS = `id, platform, author_email, author_name, content, image_url, title, subreddit, scheduled_at,
+const COLS = `id, platform, author_email, author_name, content, image_url, scheduled_at,
   status, reviewer_email, reviewer_note, published_at, x_post_id, created_at, updated_at`;
 
 async function load(id) {
@@ -27,7 +30,7 @@ export async function POST(req, { params }) {
   const b = await req.json().catch(() => ({}));
   const action = String(b.action || '');
   // Optional edits a manager applies while reviewing (platform-aware length cap).
-  const editContent = b.content != null ? String(b.content).slice(0, post.platform === 'reddit' ? 40000 : 280) : null;
+  const editContent = b.content != null ? String(b.content).slice(0, capFor(post.platform)) : null;
   const editSched = b.scheduled_at !== undefined ? (b.scheduled_at ? new Date(b.scheduled_at).toISOString() : null) : undefined;
 
   if (action === 'submit') {
@@ -54,7 +57,10 @@ export async function POST(req, { params }) {
   if (action === 'publish') {
     if (!user.isAdmin) return NextResponse.json({ error: 'Managers only' }, { status: 403 });
     if (post.status !== 'approved') return NextResponse.json({ error: 'Only approved posts can be published' }, { status: 409 });
-    const res = post.platform === 'reddit' ? await publishToReddit(post) : await publishToX(post);
+    const res = post.platform === 'facebook' ? await publishToFacebook(post)
+      : post.platform === 'linkedin' ? await publishToLinkedin(post)
+      : post.platform === 'instagram' ? await publishToInstagram(post)
+      : await publishToX(post);
     if (!res.ok) return NextResponse.json({ ok: false, skipped: res.skipped || res.error || 'not published', post });
     const { rows } = await query(
       `update ext.social_post set status='published', x_post_id=$2, published_at=now(), updated_at=now() where id=$1 returning ${COLS}`,

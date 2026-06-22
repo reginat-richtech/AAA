@@ -11,6 +11,7 @@ export default auth((req) => {
     pathname.startsWith('/api/auth') ||        // Auth.js sign-in/callback/session
     pathname.startsWith('/api/webhooks') ||    // external JotForm stage callbacks
     pathname.startsWith('/api/admin/sync') ||  // dual-auth (admin session OR cron secret) — enforced in the route
+    pathname.startsWith('/api/social/media-public') || // HMAC-signed image fetch for Instagram publishing
     pathname === '/signin';
   if (isPublic) return NextResponse.next();
 

@@ -128,8 +128,6 @@ export async function ensureExtSchema() {
       author_name    text,
       content        text not null default '',
       image_url      text,
-      title          text,                            -- Reddit: post title
-      subreddit      text,                            -- Reddit: target subreddit (no leading r/)
       scheduled_at   timestamptz,
       status         text not null default 'draft',   -- draft | submitted | approved | rejected | published
       reviewer_email text,
@@ -141,8 +139,6 @@ export async function ensureExtSchema() {
     );
     create index if not exists social_post_author_idx on ext.social_post (author_email, created_at desc);
     create index if not exists social_post_status_idx on ext.social_post (status, scheduled_at);
-    alter table ext.social_post add column if not exists title text;
-    alter table ext.social_post add column if not exists subreddit text;
 
     create table if not exists ext.social_media (
       id           text primary key,

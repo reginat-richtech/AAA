@@ -8,11 +8,12 @@ export const PROJECT_STAGES = [
   { key: 'agreement', label: 'Agreement', color: '#f97316', tracked: true },
   { key: 'invoice', label: 'QuickBooks Invoice', color: '#eab308', tracked: false },
   { key: 'request', label: 'Technician Request Form', color: '#84cc16', tracked: true },
-  { key: 'review', label: 'Review & Scheduling', color: '#22c55e', tracked: true },
+  { key: 'review', label: 'Tech Department Review & Approve', color: '#22c55e', tracked: true },
   { key: 'prep', label: 'Team Preparation', color: '#14b8a6', tracked: true },
   { key: 'confirmation', label: 'Technician Confirmation', color: '#0ea5e9', tracked: true },
   { key: 'travel', label: 'Trip & Travel Requests', color: '#6366f1', tracked: true },
   { key: 'closure', label: 'Installation & Closure', color: '#8b5cf6', tracked: false },
+  { key: 'finance', label: 'Finance Review & Reconciliation', color: '#ec4899', tracked: false },
 ];
 
 // Normalize an SO number for cross-table matching: "SO-1234" == "so 1234" == "1234".
@@ -60,7 +61,7 @@ export function buildProject(a, submission, confirmation, travelApprovedSet, app
   const tasksFor = (key) => {
     switch (key) {
       case 'proposal':
-        return [task('Customer information', null), task('Customer requirements', null), task('Inventory needed', null)];
+        return [task('Customer information', null), task('Customer requirements', null), task('Inventory needed', null), task('Robot availability & inventory', null)];
       case 'agreement':
         return [
           task('Agreement PDF uploaded', !!a.filename, a.filename),
@@ -77,20 +78,19 @@ export function buildProject(a, submission, confirmation, travelApprovedSet, app
       case 'review':
         return [
           task('Manager approval', managerApproved, appr ? `by ${appr.approved_by} · ${(appr.approved_at || '').slice(0, 10)}` : (jotformApproved ? 'Approved in JotForm' : null)),
-          task('Calendar invite created', !!cal?.html_link, cal?.date, cal?.html_link),
           task('Team & sales notified', emailsSent > 0, emailsSent ? `${emailsSent} email(s) sent` : null),
         ];
       case 'prep':
         return [
-          task('Assign technician', !!conf, (confPayload.technicians || []).join(', ') || null),
+          task('Shipping preparation', null),
           task('Prepare & test equipment', null), task('Customer communication (PM)', null),
-          task('Robot availability & inventory', null),
+          task('Calendar invite created', !!cal?.html_link, cal?.date, cal?.html_link),
         ];
       case 'confirmation':
         return [
+          task('Technicians assigned', !!conf, (confPayload.technicians || []).join(', ') || null),
           task('Confirmation form approved', !!conf, confPayload.team || null),
-          task('Travel dates set', !!confPayload.fly_out, confPayload.fly_out ? `out ${confPayload.fly_out} → back ${confPayload.fly_back || '?'}` : null),
-          task('Technicians assigned', !!(confPayload.technicians || []).length, (confPayload.technicians || []).join(', ') || null),
+          task('Technicians arrival date set', !!confPayload.fly_out, confPayload.fly_out ? `out ${confPayload.fly_out} → back ${confPayload.fly_back || '?'}` : null),
         ];
       case 'travel':
         return [
@@ -99,6 +99,14 @@ export function buildProject(a, submission, confirmation, travelApprovedSet, app
         ];
       case 'closure':
         return [task('Onsite installation', null), task('Install checklist', null), task('Customer sign-off', null), task('Project complete', null)];
+      case 'finance':
+        return [
+          task('Final invoice issued & sent', null),
+          task('Payment received', null),
+          task('Income reconciled in QuickBooks', null),
+          task('Expenses & travel costs reconciled', null),
+          task('Project financials closed', null),
+        ];
       default: return [];
     }
   };

@@ -1,0 +1,26 @@
+name: Social scheduler
+
+# Publishes approved Social Media posts whose scheduled time has arrived (X,
+# Facebook, LinkedIn) by calling the deployed app's scheduler endpoint.
+#
+# Uses the same two repo secrets as the daily sync:
+#   APP_URL           e.g. https://aaa-web.<...>.azurecontainerapps.io
+#   SYNC_CRON_SECRET  must equal the SYNC_CRON_SECRET env var on the deployed app
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes (GitHub cron min granularity ~5 min, often delayed)
+  workflow_dispatch: {}      # allow manual run from the Actions tab
+
+jobs:
+  publish-due:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish due posts
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "${APP_URL%/}/api/social/run-scheduled" \
+            -H "Authorization: Bearer ${SYNC_CRON_SECRET}" \
+            --max-time 120 | tee result.json

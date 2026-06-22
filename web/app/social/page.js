@@ -2,13 +2,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PageHeader, StageRail } from '../_components/blueprint';
 
-// Per-platform character caps (X enforces 280; Reddit is effectively long-form).
-const LIMITS = { x: 280, reddit: 40000 };
+// Per-platform character caps (X 280; Facebook long-form; LinkedIn ~3000; Instagram 2200).
+const LIMITS = { x: 280, facebook: 63206, linkedin: 3000, instagram: 2200 };
 const PLATFORMS = [
   { key: 'x', label: 'X' },
-  { key: 'reddit', label: 'Reddit' },
+  { key: 'facebook', label: 'Facebook' },
+  { key: 'linkedin', label: 'LinkedIn' },
+  { key: 'instagram', label: 'Instagram' },
 ];
-const PLATFORM_LABEL = { x: 'X', reddit: 'Reddit' };
+const PLATFORM_LABEL = { x: 'X', facebook: 'Facebook', linkedin: 'LinkedIn', instagram: 'Instagram' };
 
 // The social workflow stages, mirroring the Project Tracker's stage model.
 const SOCIAL_STAGES = [
@@ -20,7 +22,7 @@ const SOCIAL_STAGES = [
 const ORDER = ['draft', 'submitted', 'approved', 'published'];
 const STATUS_CHIP = { draft: '', submitted: 'info', approved: 'ok', rejected: 'bad', published: 'ok' };
 const PRIORITY = { submitted: 0, approved: 1, draft: 2, rejected: 3, published: 4 };
-const EMPTY = { id: null, platform: 'x', content: '', title: '', subreddit: '', scheduled_at: '', image_url: '', status: 'draft' };
+const EMPTY = { id: null, platform: 'x', content: '', scheduled_at: '', image_url: '', status: 'draft' };
 
 function toLocalInput(iso) {
   if (!iso) return '';
@@ -82,27 +84,77 @@ function TweetPreview({ name, handle, avatarUrl, content, media = [], postId }) 
   );
 }
 
-// A live Reddit preview (subreddit · title · body · one media tile).
-function RedditPreview({ subreddit, title, content, media = [], postId, author }) {
-  const sr = 'r/' + (String(subreddit || '').replace(/^\/?r\//i, '') || 'subreddit');
-  const who = String(author || 'you').replace(/^@/, '').split('@')[0].slice(0, 20) || 'you';
+// A live LinkedIn Company Page preview (reuses the Facebook card styling with a
+// LinkedIn-blue avatar — a Page post reads almost identically).
+function LinkedInPreview({ name, avatarUrl, content, media = [], postId }) {
+  const clean = String(name || 'Your Company Page');
+  const initials = (clean.replace(/[^a-zA-Z ]/g, '').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()) || 'P';
+  const url = (m) => `/api/social/${postId}/media/${m.id}`;
+  const vids = media.filter((m) => m.kind === 'video');
+  const imgs = media.filter((m) => m.kind === 'image').slice(0, 4);
+  return (
+    <div className="fb">
+      <div className="fb-head">
+        <div className="fb-av" style={{ background: '#0a66c2' }}>{avatarUrl ? <img src={avatarUrl} alt="" /> : initials}</div>
+        <div><div className="fb-name">{clean}</div><div className="fb-meta">Now · 🌐</div></div>
+      </div>
+      <div className={'fb-text' + (content ? '' : ' fb-empty')}>{content || 'Share an update…'}</div>
+      {vids.length ? (
+        <div className="fb-media n1"><video src={url(vids[0])} controls /></div>
+      ) : imgs.length ? (
+        <div className={`fb-media n${imgs.length}`}>{imgs.map((m) => <img key={m.id} src={url(m)} alt="" />)}</div>
+      ) : null}
+      <div className="fb-actions"><span>👍 Like</span><span>💬 Comment</span><span>🔁 Repost</span><span>➤ Send</span></div>
+    </div>
+  );
+}
+
+// A live Facebook Page preview (page name · "Just now" · text · media · actions).
+function FacebookPreview({ name, avatarUrl, content, media = [], postId }) {
+  const clean = String(name || 'Your Facebook Page');
+  const initials = (clean.replace(/[^a-zA-Z ]/g, '').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()) || 'P';
+  const url = (m) => `/api/social/${postId}/media/${m.id}`;
+  const vids = media.filter((m) => m.kind === 'video');
+  const imgs = media.filter((m) => m.kind === 'image').slice(0, 4);
+  return (
+    <div className="fb">
+      <div className="fb-head">
+        <div className="fb-av">{avatarUrl ? <img src={avatarUrl} alt="" /> : initials}</div>
+        <div><div className="fb-name">{clean}</div><div className="fb-meta">Just now · 🌐</div></div>
+      </div>
+      <div className={'fb-text' + (content ? '' : ' fb-empty')}>{content || "What's on your mind?"}</div>
+      {vids.length ? (
+        <div className="fb-media n1"><video src={url(vids[0])} controls /></div>
+      ) : imgs.length ? (
+        <div className={`fb-media n${imgs.length}`}>{imgs.map((m) => <img key={m.id} src={url(m)} alt="" />)}</div>
+      ) : null}
+      <div className="fb-actions"><span>👍 Like</span><span>💬 Comment</span><span>↗ Share</span></div>
+    </div>
+  );
+}
+
+// A live Instagram preview (image-first: handle · square media · actions · caption).
+// Instagram requires media, so an empty media state shows a clear placeholder.
+function InstagramPreview({ name, avatarUrl, content, media = [], postId }) {
+  const handle = String(name || 'your_account').replace(/^@/, '');
+  const initials = (handle.replace(/[^a-zA-Z]/g, '').slice(0, 2).toUpperCase()) || 'IG';
   const url = (m) => `/api/social/${postId}/media/${m.id}`;
   const vid = media.find((m) => m.kind === 'video');
   const img = media.find((m) => m.kind === 'image');
   return (
-    <div className="rd">
-      <div className="rd-head">
-        <div className="rd-srav">r/</div>
-        <div><div className="rd-sr">{sr}</div><div className="rd-meta">Posted by u/{who} · now</div></div>
+    <div className="ig">
+      <div className="ig-head">
+        <div className="ig-av">{avatarUrl ? <img src={avatarUrl} alt="" /> : initials}</div>
+        <div className="ig-handle">{handle}</div>
+        <div className="ig-more">⋯</div>
       </div>
-      <div className={'rd-title' + (title ? '' : ' rd-empty')}>{title || 'An interesting title'}</div>
-      {content ? <div className="rd-text">{content}</div> : null}
-      {vid ? (
-        <div className="rd-media"><video src={url(vid)} controls /></div>
-      ) : img ? (
-        <div className="rd-media"><img src={url(img)} alt="" /></div>
-      ) : null}
-      <div className="rd-actions"><span>⬆ Vote</span><span>💬 Comments</span><span>↗ Share</span></div>
+      <div className="ig-media">
+        {vid ? <video src={url(vid)} controls />
+          : img ? <img src={url(img)} alt="" />
+          : <div className="ig-ph">📷 Instagram needs an image or video</div>}
+      </div>
+      <div className="ig-actions"><span>♡</span><span>💬</span><span>➤</span><span className="ig-save">🔖</span></div>
+      <div className={'ig-cap' + (content ? '' : ' ig-empty')}><b>{handle}</b> {content || 'Write a caption…'}</div>
     </div>
   );
 }
@@ -113,7 +165,6 @@ const STYLE = `
   .spost:hover { border-color:var(--primary); background:var(--surface); }
   .sp-top { display:flex; align-items:center; gap:8px; }
   .sp-body { margin:8px 0; white-space:pre-wrap; word-break:break-word; font-size:13.5px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-  .sp-title { font-weight:600; font-size:13.5px; margin:8px 0 2px; }
   .srail { display:flex; align-items:flex-start; margin-top:4px; }
   .sr-col { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; }
   .sr-track { display:flex; align-items:center; width:100%; }
@@ -133,8 +184,10 @@ const STYLE = `
   .seg-btn + .seg-btn { border-left:1px solid var(--line); }
   .seg-btn.on { background:var(--primary); color:#fff; font-weight:600; }
   .pbadge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; color:#fff; letter-spacing:.02em; }
-  .pbadge[data-p="reddit"] { background:#ff4500; }
+  .pbadge[data-p="facebook"] { background:#1877f2; }
   .pbadge[data-p="x"] { background:#0f1419; }
+  .pbadge[data-p="linkedin"] { background:#0a66c2; }
+  .pbadge[data-p="instagram"] { background:linear-gradient(45deg,#f09433,#dc2743,#bc1888); }
   .tw { border:1px solid #cfd9de; border-radius:16px; padding:12px 14px; background:#fff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
   .tw-head { display:flex; align-items:center; gap:10px; }
   .tw-av { width:40px; height:40px; border-radius:50%; background:#1d9bf0; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex:0 0 auto; overflow:hidden; }
@@ -148,17 +201,33 @@ const STYLE = `
   .tw-media img, .tw-media video { width:100%; height:100%; object-fit:cover; display:block; aspect-ratio:16/10; background:#000; }
   .tw-media.n3 img:first-child { grid-row:span 2; aspect-ratio:auto; height:100%; }
   .tw-actions { display:flex; gap:38px; margin-top:10px; color:#536471; font-size:14px; }
-  .rd { border:1px solid #ccc; border-radius:8px; padding:12px 14px; background:#fff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-  .rd-head { display:flex; align-items:center; gap:8px; }
-  .rd-srav { width:28px; height:28px; border-radius:50%; background:#ff4500; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; flex:0 0 auto; }
-  .rd-sr { font-weight:700; font-size:13px; color:#1a1a1b; line-height:1.2; }
-  .rd-meta { color:#7c7c7c; font-size:12px; }
-  .rd-title { margin:10px 0 6px; font-size:17px; font-weight:600; color:#222; line-height:1.3; word-break:break-word; }
-  .rd-title.rd-empty { color:#a8a8a8; font-weight:500; }
-  .rd-text { font-size:14px; line-height:1.5; color:#1a1a1b; white-space:pre-wrap; word-break:break-word; }
-  .rd-media { margin-top:8px; border:1px solid #e2e2e2; border-radius:8px; overflow:hidden; }
-  .rd-media img, .rd-media video { width:100%; display:block; max-height:340px; object-fit:contain; background:#000; }
-  .rd-actions { display:flex; gap:20px; margin-top:12px; color:#878a8c; font-size:13px; font-weight:600; }
+  .fb { border:1px solid #dadde1; border-radius:10px; padding:12px 14px; background:#fff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }
+  .fb-head { display:flex; align-items:center; gap:10px; }
+  .fb-av { width:40px; height:40px; border-radius:50%; background:#1877f2; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex:0 0 auto; overflow:hidden; }
+  .fb-av img { width:100%; height:100%; object-fit:cover; }
+  .fb-name { font-weight:600; font-size:15px; color:#050505; line-height:1.2; }
+  .fb-meta { color:#65676b; font-size:12px; }
+  .fb-text { margin:10px 0; font-size:15px; line-height:1.4; color:#050505; white-space:pre-wrap; word-break:break-word; }
+  .fb-text.fb-empty { color:#8a8d91; }
+  .fb-media { display:grid; gap:2px; border-radius:8px; overflow:hidden; border:1px solid #dadde1; margin-top:2px; }
+  .fb-media.n2, .fb-media.n3, .fb-media.n4 { grid-template-columns:1fr 1fr; }
+  .fb-media img, .fb-media video { width:100%; height:100%; object-fit:cover; display:block; aspect-ratio:16/10; background:#000; }
+  .fb-media.n3 img:first-child { grid-row:span 2; aspect-ratio:auto; height:100%; }
+  .fb-actions { display:flex; gap:28px; margin-top:10px; padding-top:8px; border-top:1px solid #ced0d4; color:#65676b; font-size:14px; font-weight:600; }
+  .ig { border:1px solid #dbdbdb; border-radius:8px; background:#fff; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  .ig-head { display:flex; align-items:center; gap:10px; padding:10px 12px; }
+  .ig-av { width:32px; height:32px; border-radius:50%; background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:11px; flex:0 0 auto; overflow:hidden; }
+  .ig-av img { width:100%; height:100%; object-fit:cover; }
+  .ig-handle { font-weight:600; font-size:14px; color:#262626; }
+  .ig-more { margin-left:auto; color:#262626; font-weight:700; }
+  .ig-media { width:100%; aspect-ratio:1/1; background:#fafafa; display:flex; align-items:center; justify-content:center; border-top:1px solid #efefef; border-bottom:1px solid #efefef; }
+  .ig-media img, .ig-media video { width:100%; height:100%; object-fit:cover; display:block; }
+  .ig-ph { color:#8e8e8e; font-size:13px; padding:24px; text-align:center; }
+  .ig-actions { display:flex; gap:16px; padding:10px 12px 4px; font-size:18px; color:#262626; }
+  .ig-actions .ig-save { margin-left:auto; }
+  .ig-cap { padding:2px 12px 12px; font-size:14px; line-height:1.4; color:#262626; white-space:pre-wrap; word-break:break-word; }
+  .ig-cap.ig-empty { color:#8e8e8e; }
+  .ig-cap b { font-weight:600; margin-right:4px; }
 `;
 
 export default function Social() {
@@ -166,19 +235,36 @@ export default function Social() {
   const [form, setForm] = useState(null);   // null = list view; otherwise the full-page editor
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [liStatus, setLiStatus] = useState(null);   // LinkedIn connection status (admins)
+  const [comments, setComments] = useState(null);   // comment review for a published LinkedIn post
 
   const load = useCallback(() => {
     fetch('/api/social').then((r) => r.json()).then((d) => { if (d && !d.error) setData(d); }).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
+  // LinkedIn connection status drives the Connect button (admins only).
+  useEffect(() => {
+    if (!data.isAdmin) return;
+    fetch('/api/linkedin/status').then((r) => r.json()).then((s) => { if (!s.error) setLiStatus(s); }).catch(() => {});
+  }, [data.isAdmin]);
+
+  // Read comments on a published LinkedIn Company Page post (live from LinkedIn).
+  async function loadComments() {
+    const p = form?.id ? data.posts.find((x) => x.id === form.id) : null;
+    if (!p?.x_post_id) return;
+    setComments({ loading: true });
+    const r = await fetch('/api/linkedin/comments?post=' + encodeURIComponent(p.x_post_id))
+      .then((x) => x.json()).catch(() => ({ error: 'fetch failed' }));
+    setComments({ loading: false, items: r.comments || [], error: r.error || null });
+  }
 
   const setF = (k, v) => setForm((s) => ({ ...s, [k]: v }));
-  const openNew = () => { setMsg(null); setForm({ ...EMPTY }); window.scrollTo({ top: 0 }); };
-  const openPost = (p) => { setMsg(null); setForm({ id: p.id, platform: p.platform || 'x', content: p.content || '', title: p.title || '', subreddit: p.subreddit || '', scheduled_at: toLocalInput(p.scheduled_at), image_url: p.image_url || '', status: p.status }); window.scrollTo({ top: 0 }); };
-  const close = () => { setForm(null); setMsg(null); };
+  const openNew = () => { setMsg(null); setComments(null); setForm({ ...EMPTY }); window.scrollTo({ top: 0 }); };
+  const openPost = (p) => { setMsg(null); setComments(null); setForm({ id: p.id, platform: p.platform || 'x', content: p.content || '', scheduled_at: toLocalInput(p.scheduled_at), image_url: p.image_url || '', status: p.status }); window.scrollTo({ top: 0 }); };
+  const close = () => { setForm(null); setMsg(null); setComments(null); };
 
-  // Shared body for create/save — keeps platform-specific fields together.
-  const payloadOf = (f) => ({ platform: f.platform, content: f.content, title: f.title || null, subreddit: f.subreddit || null, scheduled_at: f.scheduled_at || null, image_url: f.image_url || null });
+  // Shared body for create/save.
+  const payloadOf = (f) => ({ platform: f.platform, content: f.content, scheduled_at: f.scheduled_at || null, image_url: f.image_url || null });
 
   async function save(submit) {
     setBusy(true); setMsg(null);
@@ -242,26 +328,26 @@ export default function Social() {
   let rejected = 0;
   for (const p of data.posts) { if (p.status === 'rejected') rejected++; else if (counts[p.status] != null) counts[p.status]++; }
   const posts = [...data.posts].sort((a, b) => (PRIORITY[a.status] ?? 9) - (PRIORITY[b.status] ?? 9) || new Date(b.updated_at) - new Date(a.updated_at));
-  const isReddit = form?.platform === 'reddit';
+  const isInstagram = form?.platform === 'instagram';
   const limit = form ? (LIMITS[form.platform] || 280) : 280;
   const over = !!form && form.content.length > limit;
-  // Reddit needs a subreddit + title; X needs body text.
-  const canSubmit = form && (isReddit ? (!!form.subreddit.trim() && !!form.title.trim()) : !!form.content.trim());
   const isDraftish = form && (!form.id || form.status === 'draft' || form.status === 'rejected');
   const isReview = form && data.isAdmin && form.id && (form.status === 'submitted' || form.status === 'approved');
   const editingPost = form?.id ? data.posts.find((p) => p.id === form.id) : null;
   const currentMedia = editingPost?.media || [];
+  // Instagram requires media (caption optional); the other platforms require text.
+  const canSubmit = form && (isInstagram ? currentMedia.length > 0 : !!form.content.trim());
   const xacct = data.xAccount;
+  const igacct = data.igAccount;
   const previewName = xacct?.name || editingPost?.author_name || editingPost?.author_email || data.email || 'You';
   const previewHandle = xacct?.username || null;
   const previewAvatar = xacct?.profile_image_url || null;
-  const redditAuthor = editingPost?.author_name || editingPost?.author_email || data.email || 'you';
 
   // ── Full-page editor ──────────────────────────────────────────────────────
   if (form) {
     return (
       <>
-        <PageHeader title={form.id ? 'Edit post' : 'New post'} sub="Compose, attach media, and preview exactly how it will appear on X or Reddit." sheet="Social Media" />
+        <PageHeader title={form.id ? 'Edit post' : 'New post'} sub="Compose, attach media, and preview exactly how it will appear on X, Facebook, LinkedIn, or Instagram." sheet="Social Media" />
         <div className="toolbar">
           <button className="secondary" onClick={close}>← Back to posts</button>
           {form.id && <span className={'chip ' + (STATUS_CHIP[form.status] || '')}>{form.status}</span>}
@@ -281,20 +367,8 @@ export default function Social() {
               )}
             </div>
 
-            {isReddit && (
-              <>
-                <label className="sd-label" style={{ marginTop: 12 }}>Subreddit
-                  <input value={form.subreddit} onChange={(e) => setF('subreddit', e.target.value)} placeholder="e.g. robotics (no “r/”)" />
-                </label>
-                <label className="sd-label" style={{ marginTop: 12 }}>Title
-                  <input value={form.title} onChange={(e) => setF('title', e.target.value)} placeholder="Post title" maxLength={300} />
-                  <span className="note">{form.title.length} / 300</span>
-                </label>
-              </>
-            )}
-
-            <label className="sd-label" style={{ marginTop: 12 }}>{isReddit ? 'Body text (optional)' : 'Post text'}
-              <textarea rows={8} value={form.content} onChange={(e) => setF('content', e.target.value)} placeholder={isReddit ? 'Add text, or leave empty for a title-only / media post' : "What's happening?"} />
+            <label className="sd-label" style={{ marginTop: 12 }}>Post text
+              <textarea rows={8} value={form.content} onChange={(e) => setF('content', e.target.value)} placeholder={form.platform === 'facebook' ? "What's on your mind?" : form.platform === 'linkedin' ? 'Share an update…' : form.platform === 'instagram' ? 'Write a caption…' : "What's happening?"} />
             </label>
             <div className="note" style={{ marginTop: -2, color: over ? 'var(--bad)' : 'var(--muted)' }}>{form.content.length} / {limit}</div>
 
@@ -317,6 +391,7 @@ export default function Social() {
               )}
               <input type="file" accept="image/*,video/*" multiple onChange={(e) => { uploadMedia(e.target.files); e.target.value = ''; }} disabled={busy} />
               <span className="note">Images up to 10 MB · video up to 50 MB.</span>
+              {isInstagram && currentMedia.length === 0 && <span className="note" style={{ color: 'var(--bad)' }}>Instagram requires at least one image — add media to submit.</span>}
             </div>
 
             {msg?.ok && <p className="ok-msg">{msg.ok}</p>}{msg?.err && <p className="error">{msg.err}</p>}
@@ -329,12 +404,33 @@ export default function Social() {
               {data.isAdmin && form.status === 'approved' && <button onClick={() => act(form.id, 'publish')} disabled={busy}>Publish now</button>}
               {form.id && (isDraftish || data.isAdmin) && <button className="secondary" onClick={() => del(form.id)} disabled={busy} style={{ marginLeft: 'auto' }}>Delete</button>}
             </div>
+
+            {/* Comment review — published LinkedIn Company Page posts only. */}
+            {form.platform === 'linkedin' && form.status === 'published' && editingPost?.x_post_id && (
+              <div style={{ marginTop: 16, borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <b>Comments</b>
+                  <button type="button" className="secondary" onClick={loadComments} disabled={busy || comments?.loading}>
+                    {comments?.loading ? 'Loading…' : (comments ? 'Refresh' : 'Load comments')}
+                  </button>
+                </div>
+                {comments?.error && <p className="error">{comments.error}</p>}
+                {comments && !comments.loading && !comments.error && (comments.items || []).length === 0 && <p className="note">No comments yet.</p>}
+                {(comments?.items || []).map((c, i) => (
+                  <div key={i} className="note" style={{ marginTop: 6 }}><b>{(c.author || '').split(':').pop() || 'member'}:</b> {c.message}</div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="panel">
-            <div className="panel-title"><h2>{isReddit ? 'Reddit preview' : 'X preview'}</h2><span className="meta">how it'll look on {PLATFORM_LABEL[form.platform]}</span></div>
-            {isReddit
-              ? <RedditPreview subreddit={form.subreddit} title={form.title} content={form.content} media={currentMedia} postId={form.id} author={redditAuthor} />
+            <div className="panel-title"><h2>{PLATFORM_LABEL[form.platform]} preview</h2><span className="meta">how it'll look on {PLATFORM_LABEL[form.platform]}</span></div>
+            {form.platform === 'facebook'
+              ? <FacebookPreview name="Your Facebook Page" content={form.content} media={currentMedia} postId={form.id} />
+              : form.platform === 'linkedin'
+              ? <LinkedInPreview name={liStatus?.company || 'Your Company Page'} content={form.content} media={currentMedia} postId={form.id} />
+              : form.platform === 'instagram'
+              ? <InstagramPreview name={igacct?.username || 'your_account'} avatarUrl={igacct?.picture || null} content={form.content} media={currentMedia} postId={form.id} />
               : <TweetPreview name={previewName} handle={previewHandle} avatarUrl={previewAvatar} content={form.content} media={currentMedia} postId={form.id} />}
           </section>
         </div>
@@ -346,7 +442,7 @@ export default function Social() {
   // ── List / tracker view ───────────────────────────────────────────────────
   return (
     <>
-      <PageHeader title="Social Media" sub="Draft posts for X or Reddit, schedule a send time, and route them through manager approval." sheet="Social Media" />
+      <PageHeader title="Social Media" sub="Draft posts for X, Facebook, LinkedIn, or Instagram, schedule a send time, and route them through manager approval." sheet="Social Media" />
 
       <section className="panel">
         <div className="panel-title"><h2>Post tracker</h2><span className="meta">draft → submitted → approved → published</span></div>
@@ -357,6 +453,9 @@ export default function Social() {
       <div className="toolbar">
         <button onClick={openNew}>+ New post</button>
         <span className="note">{posts.length} post(s) {data.isAdmin ? '(all authors)' : ''}</span>
+        {data.isAdmin && (liStatus?.connected
+          ? <span className="note" style={{ marginLeft: 'auto' }}>🔗 LinkedIn: {liStatus.company || 'connected'} · <a href="/api/linkedin/connect">reconnect</a></span>
+          : <a className="note" style={{ marginLeft: 'auto' }} href="/api/linkedin/connect">🔗 Connect LinkedIn</a>)}
       </div>
 
       <div className="sgrid">
@@ -369,10 +468,7 @@ export default function Social() {
               {p.media?.length > 0 && <span className="note">📎 {p.media.length}</span>}
               <span className="note" style={{ marginLeft: 'auto' }}>📅 {fmtWhen(p.scheduled_at)}</span>
             </div>
-            {p.platform === 'reddit' && (p.subreddit || p.title) && (
-              <div className="sp-title">{p.subreddit ? `r/${p.subreddit} · ` : ''}{p.title || ''}</div>
-            )}
-            <div className="sp-body">{p.content || (p.platform === 'reddit' && p.title ? <span className="note">(title-only / media)</span> : <span className="note">(empty)</span>)}</div>
+            <div className="sp-body">{p.content || <span className="note">(empty)</span>}</div>
             <SocialRail status={p.status} />
           </button>
         )) : <p className="note">No posts yet — click “+ New post”.</p>}
