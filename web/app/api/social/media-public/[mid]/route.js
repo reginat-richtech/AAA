@@ -28,10 +28,21 @@ export async function GET(req, { params }) {
   const { rows } = await query(`select content_type, filename, bytes from ext.social_media where id = $1`, [mid]);
   const m = rows[0];
   if (!m) return new Response('not found', { status: 404 });
-  return new Response(m.bytes, {
+
+  // Instagram's image_url accepts JPEG only — transparently convert any other
+  // raster image (PNG, WebP, HEIC, screenshots…) to JPEG via sharp so it posts.
+  let bytes = m.bytes;
+  let contentType = m.content_type || 'application/octet-stream';
+  if (/^image\//i.test(contentType) && !/jpe?g/i.test(contentType)) {
+    try {
+      const sharp = (await import('sharp')).default;
+      bytes = await sharp(m.bytes).flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
+      contentType = 'image/jpeg';
+    } catch { /* fall back to original bytes if conversion fails */ }
+  }
+  return new Response(bytes, {
     headers: {
-      'Content-Type': m.content_type || 'application/octet-stream',
-      'Content-Disposition': `inline; filename="${(m.filename || 'media').replace(/"/g, '')}"`,
+      'Content-Type': contentType,
       'Cache-Control': 'public, max-age=300',
     },
   });

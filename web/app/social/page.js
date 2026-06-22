@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { PageHeader, StageRail } from '../_components/blueprint';
+import { validateSocialPost } from '../../lib/socialPlatforms';
 
 // Per-platform character caps (X 280; Facebook long-form; LinkedIn ~3000; Instagram 2200).
 const LIMITS = { x: 280, facebook: 63206, linkedin: 3000, instagram: 2200 };
@@ -328,15 +329,15 @@ export default function Social() {
   let rejected = 0;
   for (const p of data.posts) { if (p.status === 'rejected') rejected++; else if (counts[p.status] != null) counts[p.status]++; }
   const posts = [...data.posts].sort((a, b) => (PRIORITY[a.status] ?? 9) - (PRIORITY[b.status] ?? 9) || new Date(b.updated_at) - new Date(a.updated_at));
-  const isInstagram = form?.platform === 'instagram';
   const limit = form ? (LIMITS[form.platform] || 280) : 280;
   const over = !!form && form.content.length > limit;
   const isDraftish = form && (!form.id || form.status === 'draft' || form.status === 'rejected');
   const isReview = form && data.isAdmin && form.id && (form.status === 'submitted' || form.status === 'approved');
   const editingPost = form?.id ? data.posts.find((p) => p.id === form.id) : null;
   const currentMedia = editingPost?.media || [];
-  // Instagram requires media (caption optional); the other platforms require text.
-  const canSubmit = form && (isInstagram ? currentMedia.length > 0 : !!form.content.trim());
+  // Same rules the server enforces at submit — checks media, format, count, and length.
+  const submitCheck = form ? validateSocialPost({ platform: form.platform, content: form.content, media: currentMedia }) : { ok: false, errors: [] };
+  const canSubmit = !!form && submitCheck.ok;
   const xacct = data.xAccount;
   const igacct = data.igAccount;
   const previewName = xacct?.name || editingPost?.author_name || editingPost?.author_email || data.email || 'You';
@@ -391,10 +392,12 @@ export default function Social() {
               )}
               <input type="file" accept="image/*,video/*" multiple onChange={(e) => { uploadMedia(e.target.files); e.target.value = ''; }} disabled={busy} />
               <span className="note">Images up to 10 MB · video up to 50 MB.</span>
-              {isInstagram && currentMedia.length === 0 && <span className="note" style={{ color: 'var(--bad)' }}>Instagram requires at least one image — add media to submit.</span>}
             </div>
 
             {msg?.ok && <p className="ok-msg">{msg.ok}</p>}{msg?.err && <p className="error">{msg.err}</p>}
+            {isDraftish && !submitCheck.ok && submitCheck.errors.length > 0 && (
+              <p className="note" style={{ color: 'var(--bad)', marginTop: 8 }}>⚠ {submitCheck.errors[0]}</p>
+            )}
 
             <div className="sd-actions">
               {(isDraftish || data.isAdmin) && <button className="secondary" onClick={() => save(false)} disabled={busy || over}>{form.id ? 'Save' : 'Save draft'}</button>}

@@ -5,7 +5,7 @@ import { publishToX } from '../../../../../lib/integrations/x';
 import { publishToFacebook } from '../../../../../lib/integrations/facebook';
 import { publishToLinkedin } from '../../../../../lib/integrations/linkedin';
 import { publishToInstagram } from '../../../../../lib/integrations/instagram';
-import { capFor } from '../../../../../lib/socialPlatforms';
+import { capFor, validateSocialPost } from '../../../../../lib/socialPlatforms';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +36,10 @@ export async function POST(req, { params }) {
   if (action === 'submit') {
     if (!owns(user, post) && !user.isAdmin) return NextResponse.json({ error: 'Not your post' }, { status: 403 });
     if (!['draft', 'rejected'].includes(post.status)) return NextResponse.json({ error: `Cannot submit a ${post.status} post` }, { status: 409 });
+    // Validate the post (+ all attached media) against the platform BEFORE accepting it.
+    const { rows: media } = await query(`select kind, content_type from ext.social_media where post_id = $1 order by created_at`, [id]);
+    const check = validateSocialPost({ platform: post.platform, content: post.content, media });
+    if (!check.ok) return NextResponse.json({ error: check.errors.join(' ') }, { status: 422 });
     const { rows } = await query(`update ext.social_post set status='submitted', updated_at=now() where id=$1 returning ${COLS}`, [id]);
     return NextResponse.json(rows[0]);
   }
