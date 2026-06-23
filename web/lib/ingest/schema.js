@@ -177,6 +177,24 @@ export async function ensureExtSchema() {
     create index if not exists task_assignee_idx on ext.task (assignee_email);
     -- one auto-seeded task per (project, auto_key); manual tasks keep auto_key NULL (NULLs are distinct).
     create unique index if not exists task_auto_uidx on ext.task (project_id, auto_key);
+    -- New free-form columns + date/period; project & department are now optional (standalone tasks).
+    alter table ext.task add column if not exists type       text;
+    alter table ext.task add column if not exists note       text;
+    alter table ext.task add column if not exists start_date date;
+    alter table ext.task add column if not exists end_date   date;
+    alter table ext.task alter column project_id drop not null;
+    alter table ext.task alter column department drop not null;
+    update ext.task set start_date = due_date where start_date is null and due_date is not null;
+
+    -- Append-only daily-update log per task.
+    create table if not exists ext.task_update (
+      id         text primary key,
+      task_id    text not null references ext.task(id) on delete cascade,
+      author     text,
+      body       text not null,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists task_update_idx on ext.task_update (task_id, created_at desc);
 
     create table if not exists ext.task_project (
       project_id   text primary key,                -- ops.legal_agreement.id (as text)

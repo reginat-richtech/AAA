@@ -16,6 +16,15 @@ export const PROJECT_STAGES = [
   { key: 'finance', label: 'Finance Review & Reconciliation', color: '#ec4899', tracked: false },
 ];
 
+// The Step-1 (Final Proposal Form) intake checklist — also surfaced as the
+// inventory team's "need to check" worklist on the Inventory landing page.
+export const PROPOSAL_CHECKS = [
+  { key: 'customer_info', label: 'Customer information' },
+  { key: 'customer_requirements', label: 'Customer requirements' },
+  { key: 'inventory_needed', label: 'Inventory needed' },
+  { key: 'robot_availability', label: 'Robot availability & inventory' },
+];
+
 // True once a project has reached the Team Preparation step — i.e. its Tech
 // Department Review & Approve step is complete (approved in-app or via JotForm).
 // `submission` is the project's best tech-request submission. Gates which
@@ -73,7 +82,7 @@ export function buildProject(a, submission, confirmation, travelApprovedSet, app
   const tasksFor = (key) => {
     switch (key) {
       case 'proposal':
-        return [task('Customer information', null), task('Customer requirements', null), task('Inventory needed', null), task('Robot availability & inventory', null)];
+        return PROPOSAL_CHECKS.map((c) => task(c.label, null));
       case 'agreement':
         return [
           task('Agreement PDF uploaded', !!a.filename, a.filename),

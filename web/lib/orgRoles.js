@@ -12,6 +12,8 @@ export const TITLES = ['member', 'manager'];
 export const TASK_STATUS = ['todo', 'in_progress', 'blocked', 'done'];
 export const TASK_STATUS_LABEL = { todo: 'To-do', in_progress: 'In progress', blocked: 'Blocked', done: 'Done' };
 export const TASK_PRIORITY = ['low', 'normal', 'high'];
+export const TASK_TYPE = ['feature', 'bug', 'admin', 'research', 'meeting', 'other'];
+export const TASK_TYPE_LABEL = { feature: 'Feature', bug: 'Bug', admin: 'Admin', research: 'Research', meeting: 'Meeting', other: 'Other' };
 
 // The three Team-Preparation tasks auto-created on every project that reaches
 // that step — one per department. `key` is stable (used for idempotent seeding).
@@ -25,6 +27,7 @@ export const normalizeDepartment = (d) => (DEPARTMENTS.includes(d) ? d : null);
 export const normalizeTitle = (t) => (TITLES.includes(t) ? t : 'member');
 export const normalizeStatus = (s) => (TASK_STATUS.includes(s) ? s : 'todo');
 export const normalizePriority = (p) => (TASK_PRIORITY.includes(p) ? p : 'normal');
+export const normalizeType = (t) => (TASK_TYPE.includes(t) ? t : 'other');
 
 // Capabilities for one user against one task:
 //   canEdit   — change status/details (admin, dept manager, or the creator/assignee)
