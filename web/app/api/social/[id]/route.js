@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../../lib/access';
-import { query } from '../../../../lib/db';
+import { query, mutateAs } from '../../../../lib/db';
 import { capFor, normalizePlatform } from '../../../../lib/socialPlatforms';
 
 export const runtime = 'nodejs';
@@ -31,12 +31,15 @@ export async function PATCH(req, { params }) {
   const content = b.content != null ? String(b.content).slice(0, capFor(platform)) : post.content;
   const image_url = b.image_url !== undefined ? (b.image_url ? String(b.image_url).slice(0, 500) : null) : post.image_url;
   const scheduled_at = b.scheduled_at !== undefined ? (b.scheduled_at ? new Date(b.scheduled_at).toISOString() : null) : post.scheduled_at;
-  const { rows } = await query(
-    `update ext.social_post set platform = $2, content = $3, image_url = $4, scheduled_at = $5, updated_at = now()
-     where id = $1 returning ${COLS}`,
-    [id, platform, content, image_url, scheduled_at],
-  );
-  return NextResponse.json(rows[0]);
+  const row = await mutateAs(user.email, async (q) => {
+    const { rows } = await q(
+      `update ext.social_post set platform = $2, content = $3, image_url = $4, scheduled_at = $5, updated_at = now()
+       where id = $1 returning ${COLS}`,
+      [id, platform, content, image_url, scheduled_at],
+    );
+    return rows[0];
+  });
+  return NextResponse.json(row);
 }
 
 export async function DELETE(_req, { params }) {
@@ -48,6 +51,6 @@ export async function DELETE(_req, { params }) {
   if (!user.isAdmin && !(owns(user, post) && (post.status === 'draft' || post.status === 'rejected'))) {
     return NextResponse.json({ error: 'Not allowed' }, { status: 403 });
   }
-  await query('delete from ext.social_post where id = $1', [id]);
+  await mutateAs(user.email, (q) => q('delete from ext.social_post where id = $1', [id]));
   return NextResponse.json({ ok: true });
 }

@@ -5,9 +5,12 @@ import { PageHeader } from '../_components/blueprint';
 
 export default function Inventory() {
   const [data, setData] = useState({ canEdit: false, projects: [], carts: [], inventory: [] });
-  const [selectedId, setSelectedId] = useState('');
-  const [addModal, setAddModal] = useState(null);   // { cn_sku_id, quantity, note }
+  const [collapsed, setCollapsed] = useState({});
+  const [addModal, setAddModal] = useState(null);  // { project_id, label }
+  const [invSearch, setInvSearch] = useState('');  // search inventory inside the add modal
+  const [qtys, setQtys] = useState({});
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
 
   const load = () => fetch('/api/inventory/cart').then((r) => r.json()).then((d) => { if (d && !d.error) setData(d); }).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -18,20 +21,30 @@ export default function Inventory() {
     return m;
   }, [data.carts]);
 
-  const project = (data.projects || []).find((p) => p.id === selectedId) || null;
-  const cart = selectedId ? (cartByProject[selectedId] || []) : [];
-  const withCarts = (data.projects || []).filter((p) => (cartByProject[p.id] || []).length);
+  // Every project shows as a card.
+  const projects = data.projects || [];
 
-  async function addToCart() {
-    if (!selectedId || !addModal.cn_sku_id) return;
-    setBusy(true);
-    const res = await fetch(`/api/inventory/${addModal.cn_sku_id}/allocate`, {
+  const isOpen = (pid, hasCart) => (collapsed[pid] === undefined ? hasCart : !collapsed[pid]);
+  const toggle = (pid, hasCart) => { const open = isOpen(pid, hasCart); setCollapsed((m) => ({ ...m, [pid]: open })); };
+
+  const canEdit = data.canEdit;
+  const invResults = useMemo(() => {
+    const inv = data.inventory || [];
+    if (!invSearch) return inv.slice(0, 60);
+    const s = invSearch.toLowerCase();
+    return inv.filter((it) => `${it.product_name || ''} ${it.sku || ''} ${it.category || ''} ${it.product_line || ''}`.toLowerCase().includes(s)).slice(0, 60);
+  }, [data.inventory, invSearch]);
+
+  async function addItem(item) {
+    setBusy(true); setMsg('');
+    const quantity = Number(qtys[item.id]) || 1;
+    const res = await fetch(`/api/inventory/${item.id}/allocate`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ project_id: selectedId, quantity: addModal.quantity || null, note: addModal.note || null }),
+      body: JSON.stringify({ project_id: addModal.project_id, quantity }),
     });
     setBusy(false);
-    if (res.ok) { setAddModal(null); load(); }
-    else { const j = await res.json().catch(() => ({})); alert(j.error || 'Add failed'); }
+    if (res.ok) { setMsg(`Added ${item.sku || item.product_name}`); load(); }
+    else { const j = await res.json().catch(() => ({})); setMsg(j.error || 'Add failed'); }
   }
   async function removeLine(id) {
     setBusy(true);
@@ -39,94 +52,71 @@ export default function Inventory() {
     setBusy(false); load();
   }
 
-  const canEdit = data.canEdit;
+  const modalCart = addModal ? (cartByProject[addModal.project_id] || []) : [];
 
   return (
     <>
-      <PageHeader title="Inventory" sub="Inventory needed per project — a shopping cart built from the proposal form. Add the items each project needs; open the full stock list for what we have." sheet="Inventory" />
+      <PageHeader title="Inventory" sub="Every project is a card with its inventory cart. Open a card, then search inventory and add what it needs." sheet="Inventory" />
 
       <div className="toolbar">
         <Link href="/inventory/detail" className="invbtn">📦 Full inventory detail (stock list) →</Link>
-        <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} style={{ minWidth: 320 }}>
-          <option value="">Choose a project…</option>
-          {(data.projects || []).map((p) => (
-            <option key={p.id} value={p.id}>{p.project_number} — {p.title || p.counterparty || 'project'}{(cartByProject[p.id] || []).length ? ` (${cartByProject[p.id].length})` : ''}</option>
-          ))}
-        </select>
-        {!canEdit && <span className="note">View only — admins / inventory team can edit carts.</span>}
+        {!canEdit && <span className="note">View only — admins / inventory team can add.</span>}
+        <span className="note" style={{ marginLeft: 'auto' }}>{projects.length} project(s)</span>
       </div>
 
-      {!selectedId ? (
-        <>
-          <div className="panel"><p className="note" style={{ margin: 0 }}>Choose a project above to see what it needs and build its inventory cart.</p></div>
-          {withCarts.length > 0 && (
-            <div className="panel" style={{ marginTop: 12 }}>
-              <div className="panel-title"><h2>Projects with a cart</h2><span className="meta">{withCarts.length}</span></div>
-              <div className="cart-quick">
-                {withCarts.map((p) => (
-                  <button key={p.id} className="cart-qchip" onClick={() => setSelectedId(p.id)}>
-                    {p.project_number} <span className="note">{(cartByProject[p.id] || []).length} item(s)</span>
-                  </button>
-                ))}
+      {projects.map((p) => {
+        const cart = cartByProject[p.id] || [];
+        const open = isOpen(p.id, cart.length > 0);
+        return (
+          <div className="panel inv-block" key={p.id}>
+            <div className="inv-bhead" onClick={() => toggle(p.id, cart.length > 0)}>
+              <span className="inv-caret">{open ? '▾' : '▸'}</span>
+              <span className="inv-pchip">{p.project_number}</span>
+              <span className="inv-ptitle">{p.title || p.counterparty || 'Project'}</span>
+              {p.robot_types && <span className="note">🤖 {p.robot_types}{p.robot_count != null ? ` · ${p.robot_count}` : ''}</span>}
+              <span className="note" style={{ marginLeft: 'auto' }}>🛒 {cart.length} item(s)</span>
+            </div>
+            {open && (
+              <div className="inv-bbody" onClick={(e) => e.stopPropagation()}>
+                {cart.length ? (
+                  <ul className="cart-list">
+                    {cart.map((c) => (
+                      <li key={c.id}>
+                        <span className="cl-main"><b>{c.quantity ? `${c.quantity}× ` : ''}</b>{c.product_name || c.sku}</span>
+                        {c.sku && <code className="cl-sku">{c.sku}</code>}
+                        {c.note && <span className="note"> · {c.note}</span>}
+                        {canEdit && <button className="cl-rm" title="Remove" onClick={() => removeLine(c.id)} disabled={busy}>✕</button>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="note" style={{ margin: '4px 0' }}>No items in this project’s cart yet.</p>}
+                {canEdit && <button className="secondary" onClick={() => { setAddModal({ project_id: p.id, label: p.project_number }); setInvSearch(''); setMsg(''); }}>+ Add inventory</button>}
               </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          {/* From the form */}
-          <div className="panel">
-            <div className="panel-title"><h2>{project?.project_number} — {project?.title || project?.counterparty || 'Project'}</h2><span className="meta">from the proposal form</span></div>
-            <div className="cart-form">
-              {project?.robot_types && <span>🤖 <b>Robots:</b> {project.robot_types}{project.robot_count != null ? ` · ${project.robot_count} unit(s)` : ''}</span>}
-              {project?.agreement_type && <span><b>Type:</b> {project.agreement_type}</span>}
-              {project?.counterparty && <span><b>Client:</b> {project.counterparty}</span>}
-              {!project?.robot_types && !project?.agreement_type && <span className="note">No form details on the agreement.</span>}
-            </div>
+            )}
           </div>
+        );
+      })}
 
-          {/* The cart */}
-          <div className="panel tablewrap" style={{ marginTop: 12 }}>
-            <div className="panel-title" style={{ padding: '0 0 10px' }}>
-              <h2>🛒 Inventory needed ({cart.length})</h2>
-              {canEdit && <button onClick={() => setAddModal({ cn_sku_id: '', quantity: '', note: '' })}>+ Add to cart</button>}
-            </div>
-            <table>
-              <thead><tr><th>Product</th><th>SKU</th><th>Qty needed</th><th>Note</th>{canEdit && <th></th>}</tr></thead>
-              <tbody>
-                {cart.length ? cart.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.product_name || '—'}</td>
-                    <td><code>{c.sku || '—'}</code></td>
-                    <td>{c.quantity ?? ''}</td>
-                    <td className="note">{c.note || ''}</td>
-                    {canEdit && <td style={{ textAlign: 'right' }}><button className="secondary cart-rm" onClick={() => removeLine(c.id)} disabled={busy} title="Remove from cart">✕</button></td>}
-                  </tr>
-                )) : <tr><td colSpan={canEdit ? 5 : 4} className="note">Cart is empty{canEdit ? ' — click “+ Add to cart”.' : '.'}</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </>
+      {projects.length === 0 && (
+        <div className="panel"><p className="note" style={{ margin: 0 }}>No projects yet.</p></div>
       )}
 
-      {/* Add-to-cart modal */}
+      {/* Search-and-add inventory modal (scoped to one project) */}
       {addModal && (
-        <div className="cart-overlay" onClick={() => setAddModal(null)}>
-          <div className="cart-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="cart-mhead"><b>Add to {project?.project_number}’s cart</b><button className="secondary" onClick={() => setAddModal(null)} style={{ marginLeft: 'auto' }}>✕</button></div>
-            <label className="cart-f">Inventory item
-              <select value={addModal.cn_sku_id} onChange={(e) => setAddModal({ ...addModal, cn_sku_id: e.target.value })}>
-                <option value="">Select an item…</option>
-                {(data.inventory || []).map((it) => <option key={it.id} value={it.id}>{(it.sku ? it.sku + ' — ' : '')}{it.product_name || 'item'}{it.quantity != null ? ` (in stock ${it.quantity})` : ''}</option>)}
-              </select>
-            </label>
-            <div className="cart-frow">
-              <label className="cart-f">Qty needed<input type="number" value={addModal.quantity} onChange={(e) => setAddModal({ ...addModal, quantity: e.target.value })} /></label>
-              <label className="cart-f">Note<input value={addModal.note} onChange={(e) => setAddModal({ ...addModal, note: e.target.value })} placeholder="optional" /></label>
-            </div>
-            <div className="cart-actions">
-              <button onClick={addToCart} disabled={busy || !addModal.cn_sku_id}>Add to cart</button>
-              <button className="secondary" onClick={() => setAddModal(null)}>Cancel</button>
+        <div className="inv-overlay" onClick={() => setAddModal(null)}>
+          <div className="inv-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="inv-mhead"><b>Add inventory to {addModal.label}</b><button className="secondary" onClick={() => setAddModal(null)} style={{ marginLeft: 'auto' }}>Done</button></div>
+            {modalCart.length > 0 && <p className="note" style={{ marginTop: 0 }}>In cart: {modalCart.length} item(s)</p>}
+            <input autoFocus className="inv-msearch" placeholder="Search inventory — product, SKU, line…" value={invSearch} onChange={(e) => setInvSearch(e.target.value)} />
+            {msg && <p className="note inv-msg">{msg}</p>}
+            <div className="inv-results">
+              {invResults.length ? invResults.map((it) => (
+                <div className="inv-rrow" key={it.id}>
+                  <div className="inv-rname">{it.product_name || it.sku || 'item'}<div className="inv-rmeta">{it.sku ? <code>{it.sku}</code> : null} {it.product_line ? <span className="chip ok">{it.product_line}</span> : null} <span className="note">stock {it.quantity ?? '—'}</span></div></div>
+                  <input type="number" min="1" value={qtys[it.id] ?? 1} onChange={(e) => setQtys((s) => ({ ...s, [it.id]: e.target.value }))} className="inv-rqty" disabled={busy} />
+                  <button onClick={() => addItem(it)} disabled={busy}>Add</button>
+                </div>
+              )) : <p className="note">No inventory matches.</p>}
             </div>
           </div>
         </div>
@@ -135,20 +125,28 @@ export default function Inventory() {
       <style>{`
         .invbtn { display:inline-flex; align-items:center; background:var(--primary); color:#fff; padding:8px 16px; border-radius:8px; font-weight:600; font-size:13px; }
         .invbtn:hover { filter:brightness(1.08); }
-        .cart-form { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:13.5px; }
-        .cart-quick { display:flex; flex-wrap:wrap; gap:8px; }
-        .cart-qchip { border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:8px 12px; cursor:pointer; font:inherit; color:var(--ink); }
-        .cart-qchip:hover { border-color:var(--primary); }
-        .cart-rm { font-size:11px; padding:2px 8px; }
-        .panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-        .cart-overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:60; display:flex; align-items:flex-start; justify-content:center; padding:48px 16px; }
-        .cart-modal { width:460px; max-width:96vw; background:var(--surface); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.3); padding:18px; }
-        .cart-mhead { display:flex; align-items:center; gap:10px; padding-bottom:10px; margin-bottom:6px; border-bottom:1px solid var(--line); }
-        .cart-f { display:grid; gap:4px; font-size:13px; color:var(--muted); margin-top:10px; }
-        .cart-f input, .cart-f select { width:100%; }
-        .cart-frow { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-        .cart-actions { display:flex; gap:8px; margin-top:18px; }
-        table code { font-size:12px; }
+        .inv-block { padding:0; overflow:hidden; margin-bottom:10px; }
+        .inv-bhead { display:flex; align-items:center; gap:10px; padding:11px 14px; cursor:pointer; }
+        .inv-bhead:hover { background:rgba(0,0,0,.02); }
+        .inv-caret { color:var(--muted); width:12px; }
+        .inv-pchip { font-weight:700; font-size:11px; background:#0f172a; color:#fff; padding:1px 8px; border-radius:999px; }
+        .inv-ptitle { font-weight:600; font-size:14px; }
+        .inv-bbody { border-top:1px solid var(--line); padding:12px 14px; }
+        .cart-list { list-style:none; margin:0 0 10px; padding:0; display:flex; flex-direction:column; gap:6px; }
+        .cart-list li { position:relative; font-size:13px; padding-right:22px; }
+        .cl-sku { font-size:11px; margin-left:6px; }
+        .cl-rm { position:absolute; top:0; right:0; border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; }
+        .cl-rm:hover { color:var(--bad); }
+        .inv-overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:60; display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow:auto; }
+        .inv-modal { width:560px; max-width:96vw; background:var(--surface); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.3); padding:18px; }
+        .inv-mhead { display:flex; align-items:center; gap:10px; padding-bottom:10px; margin-bottom:8px; border-bottom:1px solid var(--line); }
+        .inv-msearch { width:100%; }
+        .inv-msg { color:#16a34a; margin:8px 0 0; }
+        .inv-results { margin-top:10px; max-height:380px; overflow:auto; display:flex; flex-direction:column; gap:6px; }
+        .inv-rrow { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid var(--line); }
+        .inv-rname { flex:1 1 auto; font-size:13px; font-weight:500; min-width:0; }
+        .inv-rmeta { font-size:11px; display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; font-weight:400; } .inv-rmeta code { font-size:11px; }
+        .inv-rqty { width:54px; flex:0 0 auto; }
       `}</style>
     </>
   );

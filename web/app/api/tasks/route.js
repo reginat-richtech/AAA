@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../lib/access';
-import { query } from '../../../lib/db';
+import { query, mutateAs } from '../../../lib/db';
 import { ensureExtSchema } from '../../../lib/ingest/schema';
 import { reachedTeamPrep } from '../../../lib/projectStages';
 import { normalizeStatus, normalizePriority, normalizeType, normalizeDepartment, PREP_AUTO_TASKS } from '../../../lib/orgRoles';
@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const SEL = `t.id, t.project_id, t.title, t.description, t.note, t.type, t.department, t.assignee_email, t.created_by,
-  t.status, t.priority, t.start_date, t.end_date, t.due_date, t.created_at, t.updated_at,
+  t.status, t.priority, t.tags, t.start_date, t.end_date, t.due_date, t.created_at, t.updated_at,
   a.project_number, a.title as project_title, a.counterparty,
   (select count(*) from ext.task_update u where u.task_id = t.id) as updates_count`;
 
@@ -43,7 +43,7 @@ export async function GET() {
       for (const a of PREP_AUTO_TASKS) {
         await query(
           `insert into ext.task (id, project_id, title, department, created_by, status, priority, auto_key)
-           values ($1,$2,$3,$4,'system','todo','normal',$5) on conflict (project_id, auto_key) do nothing`,
+           values ($1,$2,$3,$4,'system','open','medium',$5) on conflict (project_id, auto_key) do nothing`,
           [crypto.randomUUID(), pid, a.title, a.department, a.key],
         );
       }
@@ -110,10 +110,13 @@ export async function POST(req) {
   const end_date = body.end_date ? String(body.end_date).slice(0, 10) : null;
   const assignee = body.assignee_email ? String(body.assignee_email).trim().toLowerCase() : null;
 
-  const { rows } = await query(
-    `insert into ext.task (id, project_id, title, description, note, type, department, assignee_email, created_by, status, priority, start_date, end_date)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
-    [crypto.randomUUID(), project_id, title, description, note, type, department, assignee, user.email, status, priority, start_date, end_date],
-  );
-  return NextResponse.json(rows[0]);
+  const row = await mutateAs(user.email, async (q) => {
+    const { rows } = await q(
+      `insert into ext.task (id, project_id, title, description, note, type, department, assignee_email, created_by, status, priority, start_date, end_date)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
+      [crypto.randomUUID(), project_id, title, description, note, type, department, assignee, user.email, status, priority, start_date, end_date],
+    );
+    return rows[0];
+  });
+  return NextResponse.json(row);
 }

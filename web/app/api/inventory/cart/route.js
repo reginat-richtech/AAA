@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../../lib/access';
-import { query } from '../../../../lib/db';
+import { query, mutateAs } from '../../../../lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +42,6 @@ export async function DELETE(req) {
   }
   const id = new URL(req.url).searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
-  await query('delete from inventory.project_allocation where id = $1::bigint', [id]);
+  await mutateAs(user.email, (q) => q('delete from inventory.project_allocation where id = $1::bigint', [id]));
   return NextResponse.json({ ok: true });
 }

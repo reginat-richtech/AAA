@@ -9,9 +9,9 @@ export const DEPARTMENT_LABEL = {
 };
 export const TITLES = ['member', 'manager'];
 
-export const TASK_STATUS = ['todo', 'in_progress', 'blocked', 'done'];
-export const TASK_STATUS_LABEL = { todo: 'To-do', in_progress: 'In progress', blocked: 'Blocked', done: 'Done' };
-export const TASK_PRIORITY = ['low', 'normal', 'high'];
+export const TASK_STATUS = ['open', 'in_progress', 'done', 'cancelled'];
+export const TASK_STATUS_LABEL = { open: 'Open', in_progress: 'In progress', done: 'Done', cancelled: 'Cancelled' };
+export const TASK_PRIORITY = ['low', 'medium', 'high', 'urgent'];
 export const TASK_TYPE = ['feature', 'bug', 'admin', 'research', 'meeting', 'other'];
 export const TASK_TYPE_LABEL = { feature: 'Feature', bug: 'Bug', admin: 'Admin', research: 'Research', meeting: 'Meeting', other: 'Other' };
 
@@ -25,8 +25,8 @@ export const PREP_AUTO_TASKS = [
 
 export const normalizeDepartment = (d) => (DEPARTMENTS.includes(d) ? d : null);
 export const normalizeTitle = (t) => (TITLES.includes(t) ? t : 'member');
-export const normalizeStatus = (s) => (TASK_STATUS.includes(s) ? s : 'todo');
-export const normalizePriority = (p) => (TASK_PRIORITY.includes(p) ? p : 'normal');
+export const normalizeStatus = (s) => (TASK_STATUS.includes(s) ? s : 'open');
+export const normalizePriority = (p) => (TASK_PRIORITY.includes(p) ? p : 'medium');
 export const normalizeType = (t) => (TASK_TYPE.includes(t) ? t : 'other');
 
 // Capabilities for one user against one task:

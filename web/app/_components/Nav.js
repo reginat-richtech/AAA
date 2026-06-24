@@ -34,6 +34,7 @@ function Icon({ name }) {
     case 'database': return (<svg {...p}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 5v6c0 1.66-4 3-9 3s-9-1.34-9-3V5" /><path d="M21 11v8c0 1.66-4 3-9 3s-9-1.34-9-3v-8" /></svg>);
     case 'sync': return (<svg {...p}><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>);
     case 'shield': return (<svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>);
+    case 'activity': return (<svg {...p}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>);
     case 'share': return (<svg {...p}><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" /></svg>);
     case 'check': return (<svg {...p}><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>);
     case 'box': return (<svg {...p}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>);
@@ -85,6 +86,7 @@ export default function Nav({ collapsed = false, isAdmin = false }) {
           {renderLink({ href: '/database', label: 'Database', icon: 'database' })}
           {renderLink({ href: '/data-sync', label: 'Data Sync', icon: 'sync' })}
           {renderLink({ href: '/users', label: 'Users', icon: 'shield' })}
+          {renderLink({ href: '/activity', label: 'Activity Log', icon: 'activity' })}
           <div className="nav-sep"><span className="nav-lbl">AI Agents</span></div>
           {AI.map(renderLink)}
         </>

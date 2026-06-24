@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../../../lib/access';
-import { query } from '../../../../../lib/db';
+import { query, mutateAs } from '../../../../../lib/db';
 import { ensureExtSchema } from '../../../../../lib/ingest/schema';
 
 export const runtime = 'nodejs';
@@ -30,10 +30,13 @@ export async function POST(req, { params }) {
   const b = await req.json().catch(() => ({}));
   const body = String(b.body || '').trim().slice(0, 4000);
   if (!body) return NextResponse.json({ error: 'Update text is required.' }, { status: 400 });
-  const { rows } = await query(
-    `insert into ext.task_update (id, task_id, author, body) values ($1,$2,$3,$4)
-     returning id, author, body, created_at`,
-    [crypto.randomUUID(), id, user.email, body],
-  );
-  return NextResponse.json(rows[0]);
+  const row = await mutateAs(user.email, async (q) => {
+    const { rows } = await q(
+      `insert into ext.task_update (id, task_id, author, body) values ($1,$2,$3,$4)
+       returning id, author, body, created_at`,
+      [crypto.randomUUID(), id, user.email, body],
+    );
+    return rows[0];
+  });
+  return NextResponse.json(row);
 }

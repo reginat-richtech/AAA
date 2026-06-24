@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../../../lib/access';
-import { query } from '../../../../../lib/db';
+import { query, mutateAs } from '../../../../../lib/db';
 import { publishToX } from '../../../../../lib/integrations/x';
 import { publishToFacebook } from '../../../../../lib/integrations/facebook';
 import { publishToLinkedin } from '../../../../../lib/integrations/linkedin';
@@ -40,8 +40,11 @@ export async function POST(req, { params }) {
     const { rows: media } = await query(`select kind, content_type from ext.social_media where post_id = $1 order by created_at`, [id]);
     const check = validateSocialPost({ platform: post.platform, content: post.content, media });
     if (!check.ok) return NextResponse.json({ error: check.errors.join(' ') }, { status: 422 });
-    const { rows } = await query(`update ext.social_post set status='submitted', updated_at=now() where id=$1 returning ${COLS}`, [id]);
-    return NextResponse.json(rows[0]);
+    const row = await mutateAs(user.email, async (q) => {
+      const { rows } = await q(`update ext.social_post set status='submitted', updated_at=now() where id=$1 returning ${COLS}`, [id]);
+      return rows[0];
+    });
+    return NextResponse.json(row);
   }
 
   if (action === 'approve' || action === 'reject') {
@@ -50,12 +53,15 @@ export async function POST(req, { params }) {
     const status = action === 'approve' ? 'approved' : 'rejected';
     const content = editContent != null ? editContent : post.content;
     const scheduled_at = editSched !== undefined ? editSched : post.scheduled_at;
-    const { rows } = await query(
-      `update ext.social_post set status=$2, content=$3, scheduled_at=$4, reviewer_email=$5, reviewer_note=$6, updated_at=now()
-       where id=$1 returning ${COLS}`,
-      [id, status, content, scheduled_at, user.email, b.note ? String(b.note).slice(0, 500) : null],
-    );
-    return NextResponse.json(rows[0]);
+    const row = await mutateAs(user.email, async (q) => {
+      const { rows } = await q(
+        `update ext.social_post set status=$2, content=$3, scheduled_at=$4, reviewer_email=$5, reviewer_note=$6, updated_at=now()
+         where id=$1 returning ${COLS}`,
+        [id, status, content, scheduled_at, user.email, b.note ? String(b.note).slice(0, 500) : null],
+      );
+      return rows[0];
+    });
+    return NextResponse.json(row);
   }
 
   if (action === 'publish') {
@@ -66,11 +72,14 @@ export async function POST(req, { params }) {
       : post.platform === 'instagram' ? await publishToInstagram(post)
       : await publishToX(post);
     if (!res.ok) return NextResponse.json({ ok: false, skipped: res.skipped || res.error || 'not published', post });
-    const { rows } = await query(
-      `update ext.social_post set status='published', x_post_id=$2, published_at=now(), updated_at=now() where id=$1 returning ${COLS}`,
-      [id, res.id || null],
-    );
-    return NextResponse.json({ ok: true, post: rows[0] });
+    const row = await mutateAs(user.email, async (q) => {
+      const { rows } = await q(
+        `update ext.social_post set status='published', x_post_id=$2, published_at=now(), updated_at=now() where id=$1 returning ${COLS}`,
+        [id, res.id || null],
+      );
+      return rows[0];
+    });
+    return NextResponse.json({ ok: true, post: row });
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

@@ -124,6 +124,10 @@ export async function ensureExtSchema() {
     alter table ext.app_user add column if not exists last_seen timestamptz;
     alter table ext.app_user add column if not exists department text;
     alter table ext.app_user add column if not exists title text not null default 'member';
+    -- Stable per-user UUID: this is the actor identity recorded in audit.activity_log
+    -- (actor_app_user_id). Email stays the PK; id is the durable, opaque handle.
+    alter table ext.app_user add column if not exists id uuid not null default gen_random_uuid();
+    create unique index if not exists app_user_id_uidx on ext.app_user (id);
 
     create table if not exists ext.social_post (
       id             text primary key,
@@ -185,6 +189,13 @@ export async function ensureExtSchema() {
     alter table ext.task alter column project_id drop not null;
     alter table ext.task alter column department drop not null;
     update ext.task set start_date = due_date where start_date is null and due_date is not null;
+    -- Tags + align status/priority values to the old repo's set (open/cancelled, medium/urgent).
+    alter table ext.task add column if not exists tags jsonb not null default '[]'::jsonb;
+    alter table ext.task alter column status set default 'open';
+    alter table ext.task alter column priority set default 'medium';
+    update ext.task set status = 'open' where status = 'todo';
+    update ext.task set status = 'in_progress' where status = 'blocked';
+    update ext.task set priority = 'medium' where priority = 'normal';
 
     -- Append-only daily-update log per task.
     create table if not exists ext.task_update (
@@ -217,6 +228,27 @@ export async function ensureExtSchema() {
     );
     create index if not exists sync_log_source_idx on ext.sync_log (source, started_at desc);
   `);
+
+  // Tamper-evident audit: bring the app's own ext.* tables under the same
+  // hash-chained audit trail as the canonical schema, using the project's
+  // standard attacher audit.attach_audit() (idempotent; consistent trigger
+  // naming; also wires the TRUNCATE logger). These tables are owned by the app
+  // DB role, so this runtime attach works. The admin-owned tables the app also
+  // edits (ops.*, inventory.*) are attached by migration 0150 instead — the app
+  // role can't DDL them. The acting user is stamped per-write by mutateAs().
+  const hasAudit = (await pool.query(
+    `select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'audit' and p.proname = 'attach_audit' limit 1`,
+  )).rowCount > 0;
+  if (hasAudit) {
+    for (const [sch, tbl] of [['ext', 'task'], ['ext', 'task_update'], ['ext', 'task_project'], ['ext', 'social_post']]) {
+      try {
+        await pool.query('select audit.attach_audit($1, $2)', [sch, tbl]);
+      } catch (e) {
+        console.warn(`[audit] attach ${sch}.${tbl} skipped: ${e.message}`);
+      }
+    }
+  }
   _ensured = true;
 }
 

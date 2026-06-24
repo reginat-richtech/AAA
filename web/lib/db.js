@@ -19,6 +19,48 @@ export async function query(text, params) {
   return pool.query(text, params);
 }
 
+// Run write(s) attributed to a known app user, so the tamper-evident audit
+// trigger (audit.if_modified) records WHO did it in audit.activity_log.
+// Opens ONE transaction on a dedicated connection, resolves the user's stable
+// UUID (ext.app_user.id), sets `app.current_user_id` transaction-locally
+// (set_config(..., true) never leaks to the next borrower of the pooled
+// connection), runs fn(q) with q bound to that same connection, then commits
+// (or rolls back on throw). Reads can still use query(); only writes that
+// should be attributed need this.
+//
+//   const row = await mutateAs(user.email, async (q) => {
+//     const { rows } = await q('update ext.task set status=$2 where id=$1 returning *', [id, status]);
+//     return rows[0];
+//   });
+export async function mutateAs(actorEmail, fn) {
+  const email = String(actorEmail || '').trim().toLowerCase();
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    if (email) {
+      let id = (await client.query('select id from ext.app_user where lower(email) = $1', [email])).rows[0]?.id;
+      if (!id) {
+        // Safety net: user not recorded yet (touchUser normally does this on sign-in).
+        id = (await client.query(
+          `insert into ext.app_user (email, role) values ($1, 'user')
+             on conflict (email) do update set email = excluded.email
+           returning id`,
+          [email],
+        )).rows[0]?.id;
+      }
+      if (id) await client.query(`select set_config('app.current_user_id', $1, true)`, [String(id)]);
+    }
+    const result = await fn((text, params) => client.query(text, params));
+    await client.query('commit');
+    return result;
+  } catch (e) {
+    await client.query('rollback').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // Schemas this admin tool is allowed to read in the DB browser.
 export const BROWSABLE_SCHEMAS = [
   'core', 'crm', 'hr', 'inventory', 'invoicing', 'legal', 'ops', 'workflow', 'privacy', 'audit',

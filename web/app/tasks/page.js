@@ -3,10 +3,13 @@ import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '../_components/blueprint';
 import { TASK_STATUS, TASK_STATUS_LABEL, TASK_PRIORITY, TASK_TYPE, TASK_TYPE_LABEL } from '../../lib/orgRoles';
 
-const STATUS_COLOR = { todo: '#94a3b8', in_progress: '#0ea5e9', blocked: '#dc2626', done: '#16a34a' };
-const PRIORITY_COLOR = { low: '#94a3b8', normal: '#0ea5e9', high: '#dc2626' };
-const STATUS_EMOJI = { todo: '⚪', in_progress: '🔵', blocked: '🔴', done: '🟢' };
-const PRIORITY_EMOJI = { low: '⚪', normal: '🟡', high: '🔴' };
+const STATUS_COLOR = { open: '#94a3b8', in_progress: '#0ea5e9', done: '#16a34a', cancelled: '#6b7280' };
+const PRIORITY_COLOR = { low: '#94a3b8', medium: '#0ea5e9', high: '#f59e0b', urgent: '#dc2626' };
+const STATUS_EMOJI = { open: '⚪', in_progress: '🔵', done: '🟢', cancelled: '⚫' };
+const PRIORITY_EMOJI = { low: '⚪', medium: '🔵', high: '🟠', urgent: '🔴' };
+// Board (Kanban) colors keyed to the real task enums (open/in_progress/done/cancelled).
+const KCOLOR = { open: '#94a3b8', in_progress: '#0ea5e9', done: '#16a34a', cancelled: '#dc2626' };
+const KPRIO = { low: '#94a3b8', medium: '#0ea5e9', high: '#f59e0b', urgent: '#dc2626' };
 const ymd = (d) => (d ? String(d).slice(0, 10) : '');
 const who = (email) => (email ? String(email).split('@')[0] : '');
 const NONE = '__none__';
@@ -23,6 +26,9 @@ export default function Tasks() {
   const [addText, setAddText] = useState({});        // per-block "add a task" input
   const [collapsed, setCollapsed] = useState({});    // per-block collapse state
   const [invModal, setInvModal] = useState(null);    // { project_id, label, cn_sku_id, quantity, note } — allocate inventory
+  const [view, setView] = useState('table');          // 'table' | 'board' (PM-tracker Kanban)
+  const [dragId, setDragId] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
 
   const load = useCallback(() => {
     fetch('/api/tasks').then((r) => r.json()).then((d) => { if (d && !d.error) setData(d); }).catch(() => {});
@@ -99,13 +105,13 @@ export default function Tasks() {
     <FragmentRow key={t.id}>
       <tr className="tk-row">
         <td className="tk-name">
-          {editCell?.id === t.id ? (
+          {editCell?.id === t.id && editCell.field === 'title' ? (
             <input autoFocus value={editCell.value}
-              onChange={(e) => setEditCell({ id: t.id, value: e.target.value })}
+              onChange={(e) => setEditCell({ id: t.id, field: 'title', value: e.target.value })}
               onBlur={() => { const v = editCell.value.trim(); if (v && v !== t.title) patchField(t.id, 'title', v); setEditCell(null); }}
               onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditCell(null); }} />
           ) : (
-            <span className="tk-editable" onClick={() => setEditCell({ id: t.id, value: t.title })}>{t.title}</span>
+            <span className="tk-editable" onClick={() => setEditCell({ id: t.id, field: 'title', value: t.title })}>{t.title}</span>
           )}
         </td>
         <td>{sel(t, 'type', [<option key="" value="">—</option>, ...TASK_TYPE.map((x) => <option key={x} value={x}>{TASK_TYPE_LABEL[x]}</option>)])}</td>
@@ -118,6 +124,18 @@ export default function Tasks() {
         <td><input type="date" className="tk-cell-date" value={ymd(t.end_date)} disabled={busy} onChange={(e) => patchField(t.id, 'end_date', e.target.value || null)} /></td>
         <td>{txt(t, 'description', 'Description…')}</td>
         <td>{txt(t, 'note', 'Note…')}</td>
+        <td className="tk-tagcell">
+          {editCell?.id === t.id && editCell.field === 'tags' ? (
+            <input autoFocus value={editCell.value} placeholder="tag1, tag2"
+              onChange={(e) => setEditCell({ id: t.id, field: 'tags', value: e.target.value })}
+              onBlur={() => { const arr = editCell.value.split(',').map((s) => s.trim()).filter(Boolean); if (JSON.stringify(arr) !== JSON.stringify(t.tags || [])) patchField(t.id, 'tags', arr); setEditCell(null); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditCell(null); }} />
+          ) : (
+            <span className="tk-editable tk-tags" onClick={() => setEditCell({ id: t.id, field: 'tags', value: (t.tags || []).join(', ') })}>
+              {(t.tags || []).length ? (t.tags || []).map((tg, i) => <span key={i} className="tk-tag">{tg}</span>) : <span className="note">＋</span>}
+            </span>
+          )}
+        </td>
         <td>{sel(t, 'project_id', [<option key="" value="">— none —</option>,
           ...(data.projects || []).map((p) => <option key={p.id} value={p.id}>{p.project_number}</option>)])}</td>
         <td className="tk-upcell" onClick={() => toggleUpdates(t.id)} title="Daily updates">
@@ -127,7 +145,7 @@ export default function Tasks() {
       </tr>
       {openUpdates === t.id && (
         <tr className="tk-detailrow">
-          <td colSpan={12}>
+          <td colSpan={13}>
             <div className="tk-updates">
               <div className="tk-uphd">Daily updates — {t.title}</div>
               <div className="tk-uprow">
@@ -171,7 +189,7 @@ export default function Tasks() {
   const HEAD = (
     <thead><tr>
       <th>Task</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th>
-      <th>Start</th><th>End</th><th>Description</th><th>Note</th><th>Project</th><th title="daily updates">💬</th><th></th>
+      <th>Start</th><th>End</th><th>Description</th><th>Note</th><th>Tags</th><th>Project</th><th title="daily updates">💬</th><th></th>
     </tr></thead>
   );
 
@@ -180,13 +198,52 @@ export default function Tasks() {
       <PageHeader title="Task Tracking" sub="Tasks grouped by project — each project is its own block. Click any cell to edit it in place; add a task at the bottom of a block. Project link is optional." sheet="Task Tracking" />
 
       <div className="toolbar">
+        <div className="tk-viewtoggle">
+          <button className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
+          <button className={view === 'board' ? 'on' : ''} onClick={() => setView('board')}>Board</button>
+        </div>
         <input placeholder="Search task, type, assignee…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ minWidth: 220 }} />
         <select value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
           <option value="">All statuses</option>
           {TASK_STATUS.map((s) => <option key={s} value={s}>{TASK_STATUS_LABEL[s]}</option>)}
         </select>
-        <span className="note" style={{ marginLeft: 'auto' }}>{rows.length} task(s) · {keys.length} block(s)</span>
+        <span className="note" style={{ marginLeft: 'auto' }}>{rows.length} task(s) · {view === 'table' ? `${keys.length} block(s)` : 'board'}</span>
       </div>
+
+      {/* PM-tracker Kanban board view — columns = status, drag a card to move it. */}
+      {view === 'board' && (
+        <div className="pmk-board">
+          {TASK_STATUS.map((s) => {
+            const colTasks = rows.filter((t) => (t.status || 'open') === s);
+            return (
+              <div key={s} className={'pmk-col' + (dragOver === s ? ' drag-over' : '')}
+                onDragOver={(e) => { e.preventDefault(); if (dragOver !== s) setDragOver(s); }}
+                onDragLeave={() => setDragOver((c) => (c === s ? null : c))}
+                onDrop={() => { if (dragId) patchField(dragId, 'status', s); setDragId(null); setDragOver(null); }}>
+                <div className="pmk-colhd"><span className="pmk-dot" style={{ background: KCOLOR[s] }} /> {TASK_STATUS_LABEL[s]} <span className="note">{colTasks.length}</span></div>
+                <div className="pmk-cards">
+                  {colTasks.map((t) => (
+                    <div key={t.id} className="pmk-card" draggable
+                      onDragStart={() => setDragId(t.id)} onDragEnd={() => { setDragId(null); setDragOver(null); }}
+                      title="Drag to another column to change status">
+                      <div className="pmk-title">{t.title}</div>
+                      <div className="pmk-meta">
+                        {t.project_number && <span className="tk-projchip">{t.project_number}</span>}
+                        {t.priority && <span className="pmk-pri" style={{ color: KPRIO[t.priority] }}>● {t.priority}</span>}
+                        {t.assignee_email && <span className="note">{who(t.assignee_email)}</span>}
+                        {t.type && <span className="note">{TASK_TYPE_LABEL[t.type] || t.type}</span>}
+                      </div>
+                    </div>
+                  ))}
+                  {colTasks.length === 0 && <div className="pmk-empty">—</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {view === 'table' && (<>
 
       {keys.map((k) => {
         const gtasks = groups[k];
@@ -222,7 +279,7 @@ export default function Tasks() {
                   {HEAD}
                   <tbody>
                     {gtasks.map(renderRow)}
-                    <tr className="tk-addrow"><td colSpan={12}>
+                    <tr className="tk-addrow"><td colSpan={13}>
                       <input className="tk-addinput" placeholder="+ Add a task to this block…" value={addText[k] || ''}
                         onChange={(e) => setAddText((s) => ({ ...s, [k]: e.target.value }))}
                         onKeyDown={(e) => { if (e.key === 'Enter') addTask(k); }} disabled={busy} />
@@ -244,6 +301,7 @@ export default function Tasks() {
             onKeyDown={(e) => { if (e.key === 'Enter') addTask(NONE); }} disabled={busy} />
         </div>
       )}
+      </>)}
 
       {invModal && (
         <div className="tk-overlay" onClick={() => setInvModal(null)}>
@@ -305,6 +363,9 @@ export default function Tasks() {
         .tk-cell-date:hover, .tk-cell-date:focus { border-color:var(--line); background:var(--surface); outline:none; }
         .tk-cell-text { border:1px solid transparent; background:transparent; padding:3px 6px; font:inherit; border-radius:5px; min-width:150px; }
         .tk-cell-text:hover, .tk-cell-text:focus { border-color:var(--line); background:var(--surface); outline:none; }
+        .tk-tags { display:inline-flex; flex-wrap:wrap; gap:4px; min-width:90px; }
+        .tk-tag { background:#eef2f7; color:#334155; border-radius:5px; padding:1px 7px; font-size:11px; white-space:nowrap; }
+        .tk-tagcell input { min-width:120px; }
         .tk-upcell { cursor:pointer; text-align:center; user-select:none; }
         .tk-upc { color:var(--primary); font-weight:700; font-size:11px; }
         .tk-del { border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; padding:4px 6px; border-radius:5px; }
@@ -318,6 +379,22 @@ export default function Tasks() {
         .tk-upmeta { font-size:11px; } .tk-upbody { font-size:13px; white-space:pre-wrap; word-break:break-word; }
         .tk-addrow td { background:transparent; white-space:normal; }
         .tk-addinput { width:60%; min-width:280px; }
+        .tk-viewtoggle { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+        .tk-viewtoggle button { border:0; background:var(--surface); padding:6px 14px; font:inherit; cursor:pointer; color:var(--muted); }
+        .tk-viewtoggle button + button { border-left:1px solid var(--line); }
+        .tk-viewtoggle button.on { background:var(--primary); color:#fff; }
+        .pmk-board { display:flex; gap:12px; overflow-x:auto; align-items:flex-start; padding-bottom:10px; }
+        .pmk-col { flex:1 1 0; min-width:240px; background:#f1f1ef; border:1px solid var(--line); border-radius:10px; display:flex; flex-direction:column; }
+        .pmk-col.drag-over { background:#e6effb; box-shadow:inset 0 0 0 2px rgba(37,99,235,.25); }
+        .pmk-colhd { display:flex; align-items:center; gap:8px; padding:10px 12px; font-size:12px; font-weight:600; color:var(--ink); }
+        .pmk-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+        .pmk-cards { padding:4px 8px 10px; display:flex; flex-direction:column; gap:6px; min-height:40px; }
+        .pmk-card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:9px 11px; cursor:grab; box-shadow:var(--shadow); }
+        .pmk-card:hover { box-shadow:0 6px 18px rgba(0,0,0,.08); transform:translateY(-1px); }
+        .pmk-title { font-size:13px; font-weight:600; margin-bottom:5px; word-break:break-word; white-space:normal; }
+        .pmk-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:11px; }
+        .pmk-pri { font-weight:600; text-transform:capitalize; }
+        .pmk-empty { text-align:center; color:var(--muted); font-size:12px; padding:8px 0; }
       `}</style>
     </>
   );

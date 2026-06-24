@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../../lib/db';
+import { query, mutateAs } from '../../../../lib/db';
 import { headlineFields } from '../../../../lib/extract';
 import { requireUser, canSee } from '../../../../lib/access';
 
@@ -40,25 +40,28 @@ export async function PATCH(request, { params }) {
   const hf = headlineFields(extracted);
   const dn = (v) => (v === '' || v === undefined ? null : v);
 
-  const { rows } = await query(
-    `update ops.legal_agreement set
-       agreement_type = coalesce($2, agreement_type),
-       title = $3, counterparty = $4, governing_law = $5,
-       effective_date = $6, execution_date = $7, expiration_date = $8,
-       auto_renewal = $9, contract_value = $10, currency = coalesce($11, currency),
-       termination_notice_days = $12, summary = $13,
-       salesman_name = $14, salesman_email = $15, deal_id = $16,
-       robot_types = $17, robot_count = $18, extracted_json = $19
-     where id = $1
-     returning ${COLS}, extracted_json as extracted`,
-    [
-      id, dn(b.agreement_type), dn(b.title), dn(b.counterparty), dn(b.governing_law),
-      dn(b.effective_date), dn(b.execution_date), dn(b.expiration_date),
-      b.auto_renewal === 'yes' ? true : b.auto_renewal === 'no' ? false : (b.auto_renewal ?? null),
-      dn(b.contract_value), dn(b.currency), dn(b.termination_notice_days), dn(b.summary),
-      dn(b.salesman_name), dn(b.salesman_email), dn(b.deal_id),
-      hf.robot_types, hf.robot_count, JSON.stringify(extracted),
-    ]
-  );
-  return NextResponse.json(rows[0]);
+  const row = await mutateAs(user.email, async (q) => {
+    const { rows } = await q(
+      `update ops.legal_agreement set
+         agreement_type = coalesce($2, agreement_type),
+         title = $3, counterparty = $4, governing_law = $5,
+         effective_date = $6, execution_date = $7, expiration_date = $8,
+         auto_renewal = $9, contract_value = $10, currency = coalesce($11, currency),
+         termination_notice_days = $12, summary = $13,
+         salesman_name = $14, salesman_email = $15, deal_id = $16,
+         robot_types = $17, robot_count = $18, extracted_json = $19
+       where id = $1
+       returning ${COLS}, extracted_json as extracted`,
+      [
+        id, dn(b.agreement_type), dn(b.title), dn(b.counterparty), dn(b.governing_law),
+        dn(b.effective_date), dn(b.execution_date), dn(b.expiration_date),
+        b.auto_renewal === 'yes' ? true : b.auto_renewal === 'no' ? false : (b.auto_renewal ?? null),
+        dn(b.contract_value), dn(b.currency), dn(b.termination_notice_days), dn(b.summary),
+        dn(b.salesman_name), dn(b.salesman_email), dn(b.deal_id),
+        hf.robot_types, hf.robot_count, JSON.stringify(extracted),
+      ],
+    );
+    return rows[0];
+  });
+  return NextResponse.json(row);
 }

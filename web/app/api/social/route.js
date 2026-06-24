@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../lib/access';
-import { query } from '../../../lib/db';
+import { query, mutateAs } from '../../../lib/db';
 import { ensureExtSchema } from '../../../lib/ingest/schema';
 import { xConfigured, getAccount } from '../../../lib/integrations/x';
 import { instagramConfigured, getAccount as getIgAccount } from '../../../lib/integrations/instagram';
@@ -43,10 +43,13 @@ export async function POST(req) {
   const content = String(body.content || '').slice(0, capFor(platform));
   const image_url = body.image_url ? String(body.image_url).slice(0, 500) : null;
   const scheduled_at = body.scheduled_at ? new Date(body.scheduled_at).toISOString() : null;
-  const { rows } = await query(
-    `insert into ext.social_post (id, author_email, author_name, platform, content, image_url, scheduled_at, status)
-     values ($1, $2, $3, $4, $5, $6, $7, 'draft') returning ${COLS}`,
-    [crypto.randomUUID(), user.email, user.name || null, platform, content, image_url, scheduled_at],
-  );
-  return NextResponse.json(rows[0]);
+  const row = await mutateAs(user.email, async (q) => {
+    const { rows } = await q(
+      `insert into ext.social_post (id, author_email, author_name, platform, content, image_url, scheduled_at, status)
+       values ($1, $2, $3, $4, $5, $6, $7, 'draft') returning ${COLS}`,
+      [crypto.randomUUID(), user.email, user.name || null, platform, content, image_url, scheduled_at],
+    );
+    return rows[0];
+  });
+  return NextResponse.json(row);
 }

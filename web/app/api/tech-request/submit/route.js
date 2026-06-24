@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../../lib/db';
+import { query, mutateAs } from '../../../../lib/db';
 import { formTypeFor, missingRequired, buildJotformPayload, JOTFORM_IDS } from '../../../../lib/techRequestForm';
 import { createJotformSubmission } from '../../../../lib/jotform';
 import { requireUser, canSee } from '../../../../lib/access';
@@ -44,23 +44,23 @@ export async function POST(request) {
   }
 
   const formType = formTypeFor(ag.agreement_type);
-  let id;
-  if (existing) {
-    id = existing.id;
-    await query(
-      `update ops.tech_request_submission
-       set answers = $2, status = $3, agreement_type = $4, form_type = $5,
-           submitted_by = coalesce(submitted_by, $6)
-       where id = $1`,
-      [id, JSON.stringify(answers), status, ag.agreement_type, formType, user.email]
-    );
-  } else {
-    const r = await query(
+  const id = await mutateAs(user.email, async (q) => {
+    if (existing) {
+      await q(
+        `update ops.tech_request_submission
+         set answers = $2, status = $3, agreement_type = $4, form_type = $5,
+             submitted_by = coalesce(submitted_by, $6)
+         where id = $1`,
+        [existing.id, JSON.stringify(answers), status, ag.agreement_type, formType, user.email]
+      );
+      return existing.id;
+    }
+    const r = await q(
       `insert into ops.tech_request_submission (agreement_id, agreement_type, form_type, status, submitted_by, answers)
        values ($1,$2,$3,$4,$5,$6) returning id`,
       [agreementId, ag.agreement_type, formType, status, user.email, JSON.stringify(answers)]
     );
-    id = r.rows[0].id;
-  }
+    return r.rows[0].id;
+  });
   return NextResponse.json({ id, saved: true, status, jotform });
 }

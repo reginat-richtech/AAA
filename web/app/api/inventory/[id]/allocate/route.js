@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUser } from '../../../../../lib/access';
-import { query } from '../../../../../lib/db';
+import { query, mutateAs } from '../../../../../lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,10 +26,13 @@ export async function POST(req, { params }) {
   const quantity = Number.isFinite(qn) ? qn : null;
   const note = b.note ? String(b.note).slice(0, 500) : null;
 
-  const { rows } = await query(
-    `insert into inventory.project_allocation (project_id, cn_sku_id, sku, product_name, quantity, note, added_by)
-     values ($1,$2,$3,$4,$5,$6,$7) returning id, project_id, cn_sku_id, quantity`,
-    [project_id, item.id, item.sku, item.product_name, quantity, note, user.email],
-  );
-  return NextResponse.json(rows[0]);
+  const row = await mutateAs(user.email, async (q) => {
+    const { rows } = await q(
+      `insert into inventory.project_allocation (project_id, cn_sku_id, sku, product_name, quantity, note, added_by)
+       values ($1,$2,$3,$4,$5,$6,$7) returning id, project_id, cn_sku_id, quantity`,
+      [project_id, item.id, item.sku, item.product_name, quantity, note, user.email],
+    );
+    return rows[0];
+  });
+  return NextResponse.json(row);
 }
