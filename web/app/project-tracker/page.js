@@ -25,13 +25,13 @@ export default function ProjectTracker() {
 
   const projects = data.projects.filter((p) => {
     if (!q) return true;
-    const hay = `${p.project_number} ${p.counterparty} ${p.salesman_name} ${p.so_number} ${p.robot_types}`.toLowerCase();
+    const hay = `${p.project_number} ${p.contract_number} ${p.counterparty} ${p.salesman_name} ${p.so_number} ${p.robot_types}`.toLowerCase();
     return hay.includes(q.toLowerCase());
   });
 
   return (
     <>
-      <PageHeader title="Project Tracker" sub="Read-only workflow tree per project. Each agreement advances through 9 stages as its tech request, approval, and confirmation steps complete." sheet="Project Tracker" />
+      <PageHeader title="Project Tracker" sub="Read-only workflow tree per project. Each project starts from the Final Proposal Form, then advances through 9 stages as its agreement, tech request, approval, and confirmation steps complete." sheet="Project Tracker" />
 
       <section className="panel">
         <div className="panel-title"><h2>Project process tracker</h2><span className="meta">9 stages · red → blue</span></div>
@@ -55,10 +55,9 @@ export default function ProjectTracker() {
       <div className="toolbar">
         <input placeholder="Search client, salesman, SO#, robot…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 320 }} />
         <span className="note">{projects.length} project(s)</span>
-        <Link href="/data-upload" className="btnlink" style={{ marginLeft: 'auto' }}>+ Upload agreement</Link>
       </div>
 
-      {projects.length === 0 && <p className="note">No projects yet — upload an agreement in <Link href="/data-upload">Data Upload</Link>.</p>}
+      {projects.length === 0 && <p className="note">No projects yet — a project starts when a Final Proposal Form is submitted.</p>}
 
       {projects.map((p) => {
         const curColor = STAGE_RAMP[p.stage];
@@ -76,12 +75,15 @@ export default function ProjectTracker() {
 
             <div className="pc-meta">
               {p.agreement_type && <span className="type-pill">{p.agreement_type}</span>}
-              {p.robot_types && <span>🤖 {p.robot_types}{p.robot_count != null ? ` · ${p.robot_count} unit${p.robot_count === 1 ? '' : 's'}` : ''}</span>}
-              {p.salesman_name && <span>👤 {p.salesman_name}</span>}
+              {p.robot_types && <span><span className="mi">🤖</span> {p.robot_types}{p.robot_count != null ? ` · ${p.robot_count} unit${p.robot_count === 1 ? '' : 's'}` : ''}</span>}
+              {p.salesman_name && <span><span className="mi">👤</span> {p.salesman_name}</span>}
+              {p.contract_number && <span>Contract {p.contract_number}</span>}
               {p.so_number && <span>SO {p.so_number}</span>}
-              {p.created_at && <span>📅 {new Date(p.created_at).toLocaleDateString()}</span>}
+              {p.created_at && <span><span className="mi">📅</span> {new Date(p.created_at).toLocaleDateString()}</span>}
               <span className="pc-link" onClick={(e) => e.stopPropagation()}>
-                {!p.is_proposal_only && <Link href={`/tech-request?agreement=${p.id}`}>Tech Request ↗</Link>}
+                {p.is_proposal_only
+                  ? <Link href={`/data-upload?sales_name=${encodeURIComponent(p.salesman_name || '')}&sales_email=${encodeURIComponent(p.salesman_email || '')}&contract=${encodeURIComponent(p.contract_number || '')}`} className="btnlink">+ Upload agreement ↗</Link>
+                  : <Link href={`/tech-request?agreement=${p.id}`}>Tech Request ↗</Link>}
                 {p.jotform_url && <> · <a href={p.jotform_url} target="_blank" rel="noreferrer">JotForm ↗</a></>}
                 {p.calendar_link && <> · <a href={p.calendar_link} target="_blank" rel="noreferrer">Calendar ↗</a></>}
               </span>
@@ -97,7 +99,7 @@ export default function ProjectTracker() {
                     {n.tasks.map((t, j) => (
                       <div className="tleaf" key={j}>
                         <span className="s">{LEAF_ICON[t.status]}</span>
-                        <span>{t.label}{t.detail ? <span className="d"> — {t.detail}</span> : null}{t.url ? <> · <a href={t.url} target="_blank" rel="noreferrer">link</a></> : null}</span>
+                        <span>{t.label}{t.detail ? <span className="d"> — {t.detail}</span> : null}{t.doc ? <> · <a href={t.doc.preview} target="_blank" rel="noreferrer" title="Preview document">{t.doc.name}</a> · <a href={t.doc.download} title="Download document">Download</a></> : t.url ? <> · <a href={t.url} target="_blank" rel="noreferrer">link</a></> : null}</span>
                       </div>
                     ))}
                   </div>

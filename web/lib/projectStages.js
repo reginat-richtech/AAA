@@ -49,15 +49,30 @@ export function normSo(v) {
 }
 
 // done=null → "manual" (untracked); true/false → "done"/"pending".
-const task = (label, done, detail, url) => ({
+// doc (optional) = { name, preview, download } for an uploaded form document.
+const task = (label, done, detail, url, doc) => ({
   label, status: done === null || done === undefined ? 'manual' : done ? 'done' : 'pending',
-  detail: detail || null, url: url || null,
+  detail: detail || null, url: url || null, doc: doc || null,
 });
+
+// Display name = the file's name on the form (last path segment of the JotForm URL).
+const docName = (url) => {
+  if (!url) return null;
+  const raw = String(url).split('/').pop().split('?')[0];
+  try { return decodeURIComponent(raw) || 'document'; } catch { return raw || 'document'; }
+};
+// Build the {name, preview, download} the UI links to (served by /api/proposal-file).
+const docFor = (proposalId, key, url) => (proposalId && url ? {
+  name: docName(url),
+  preview: `/api/proposal-file/${proposalId}?doc=${key}`,
+  download: `/api/proposal-file/${proposalId}?doc=${key}&dl=1`,
+} : null);
 
 // Final Proposal Form checklist, computed from a captured ops.project_proposal
 // row (or null when no proposal is linked to this project yet → all pending).
 function proposalTasks(proposal) {
   const p = proposal || null;
+  const id = p && p.id;
   const pkg = (p && p.package_list) || [];
   const pkgText = pkg.map((x) => `${Number(x.quantity) > 1 ? `${x.quantity}× ` : ''}${x.item}`).join(', ');
   return [
@@ -65,14 +80,17 @@ function proposalTasks(proposal) {
       p ? ([p.customer_name, p.customer_email].filter(Boolean).join(' · ') || null) : null),
     task('Project information & requirements', !!(p && p.project_info),
       p && p.project_info ? p.project_info.slice(0, 90) : null),
-    task('Inventory package list', pkg.length > 0, pkgText || null, (p && p.deployment_url) || null),
+    task('Inventory package list', pkg.length > 0,
+      pkg.length ? `${pkg.length} item(s): ${pkgText.slice(0, 80)}${pkgText.length > 80 ? '…' : ''}` : null,
+      null, docFor(id, 'packing_list', p && p.packing_list_url)),
     task('Site survey report', !!(p && (p.site_survey_done || p.site_survey_url)),
       p && p.site_survey_url ? 'file uploaded' : (p && p.site_survey_done ? 'marked complete' : null),
-      (p && p.site_survey_url) || null),
+      null, docFor(id, 'site_survey', p && p.site_survey_url)),
     task('Pre-deployment tech review', !!(p && p.predeploy_review_done),
       p && p.predeploy_review_done ? 'marked complete' : null),
     task('Deployment instruction', !!(p && p.deployment_url),
-      p && p.deployment_url ? 'file uploaded' : null, (p && p.deployment_url) || null),
+      p && p.deployment_url ? 'file uploaded' : null,
+      null, docFor(id, 'deployment', p && p.deployment_url)),
   ];
 }
 
@@ -162,7 +180,8 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
   }));
 
   return {
-    id: a.id, project_number: a.project_number, title: a.title, counterparty: a.counterparty,
+    id: a.id, project_number: a.project_number, contract_number: proposal?.contract_number || null,
+    title: a.title, counterparty: a.counterparty,
     agreement_type: a.agreement_type, robot_types: a.robot_types, robot_count: a.robot_count,
     salesman_name: a.salesman_name, salesman_email: a.salesman_email, so_number: so,
     created_at: a.created_at, stage: stageIdx, stage_key: stageKey,
@@ -185,7 +204,8 @@ export function buildProposalProject(proposal) {
     tasks: s.key === 'proposal' ? proposalTasks(p) : [],
   }));
   return {
-    id: p.id, project_number: p.contract_number || 'PROPOSAL',
+    id: p.id, project_number: p.project_number || p.contract_number || 'PROPOSAL',
+    contract_number: p.contract_number || null,
     title: p.project_name || p.customer_name || 'New proposal',
     counterparty: p.customer_name || null,
     agreement_type: null, robot_types: null, robot_count: null,

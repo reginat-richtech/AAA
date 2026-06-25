@@ -3,6 +3,14 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '../_components/blueprint';
 
+// Stock-status chip for a recommended item.
+const REC_CHIP = { in_stock: 'ok', short: 'warn', out: 'bad', no_match: 'bad' };
+const recLabel = (r) =>
+  r.status === 'in_stock' ? `in stock · ${r.onHand}`
+    : r.status === 'short' ? `short by ${r.shortfall} · ${r.onHand} on hand`
+      : r.status === 'out' ? 'out of stock'
+        : 'no SKU match';
+
 export default function Inventory() {
   const [data, setData] = useState({ canEdit: false, projects: [], carts: [], inventory: [] });
   const [collapsed, setCollapsed] = useState({});
@@ -20,6 +28,12 @@ export default function Inventory() {
     for (const c of data.carts || []) (m[c.project_id] = m[c.project_id] || []).push(c);
     return m;
   }, [data.carts]);
+  // A card shows its own cart plus any items allocated while it was still a proposal
+  // (so prep done pre-agreement stays visible once the agreement lands).
+  const cartFor = (p) => {
+    const own = cartByProject[p.id] || [];
+    return p.proposal_id && p.proposal_id !== p.id ? [...own, ...(cartByProject[p.proposal_id] || [])] : own;
+  };
 
   // Every project shows as a card.
   const projects = data.projects || [];
@@ -51,6 +65,18 @@ export default function Inventory() {
     await fetch(`/api/inventory/cart?id=${id}`, { method: 'DELETE' }).catch(() => {});
     setBusy(false); load();
   }
+  // Add a recommended (matched) item straight into the project's cart.
+  async function addRecommended(projectId, rec) {
+    if (!rec.match) return;
+    setBusy(true); setMsg('');
+    const res = await fetch(`/api/inventory/${rec.match.id}/allocate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, quantity: rec.needed, note: `from proposal: ${rec.item}`.slice(0, 500) }),
+    });
+    setBusy(false);
+    if (res.ok) { setMsg(`Added ${rec.match.sku || rec.match.product_name}`); load(); }
+    else { const j = await res.json().catch(() => ({})); setMsg(j.error || 'Add failed'); }
+  }
 
   const modalCart = addModal ? (cartByProject[addModal.project_id] || []) : [];
 
@@ -65,7 +91,7 @@ export default function Inventory() {
       </div>
 
       {projects.map((p) => {
-        const cart = cartByProject[p.id] || [];
+        const cart = cartFor(p);
         const open = isOpen(p.id, cart.length > 0);
         return (
           <div className="panel inv-block" key={p.id}>
@@ -73,11 +99,29 @@ export default function Inventory() {
               <span className="inv-caret">{open ? '▾' : '▸'}</span>
               <span className="inv-pchip">{p.project_number}</span>
               <span className="inv-ptitle">{p.title || p.counterparty || 'Project'}</span>
+              {p.is_proposal && <span className="inv-proposal" title="Proposal stage — no agreement yet">Proposal</span>}
               {p.robot_types && <span className="note">🤖 {p.robot_types}{p.robot_count != null ? ` · ${p.robot_count}` : ''}</span>}
               <span className="note" style={{ marginLeft: 'auto' }}>🛒 {cart.length} item(s)</span>
             </div>
             {open && (
               <div className="inv-bbody" onClick={(e) => e.stopPropagation()}>
+                {p.recommendations?.length > 0 && (
+                  <div className="rec-block">
+                    <div className="rec-head">📋 Recommended from proposal <span className="note">· {p.recommendations.length} item(s) · match to stock</span></div>
+                    <ul className="rec-list">
+                      {p.recommendations.map((r, i) => (
+                        <li className="rec-row" key={i}>
+                          <span className="rec-need"><b>{r.needed}×</b> {r.item}</span>
+                          {r.match
+                            ? <span className="rec-to">→ {r.match.product_name || r.match.sku}{r.match.sku && <code> {r.match.sku}</code>}</span>
+                            : <span className="rec-to note">→ no matching SKU — search & add manually</span>}
+                          <span className={`chip ${REC_CHIP[r.status]}`}>{recLabel(r)}</span>
+                          {canEdit && r.match && <button className="rec-add" onClick={() => addRecommended(p.id, r)} disabled={busy}>Add</button>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {cart.length ? (
                   <ul className="cart-list">
                     {cart.map((c) => (
@@ -130,8 +174,16 @@ export default function Inventory() {
         .inv-bhead:hover { background:rgba(0,0,0,.02); }
         .inv-caret { color:var(--muted); width:12px; }
         .inv-pchip { font-weight:700; font-size:11px; background:#0f172a; color:#fff; padding:1px 8px; border-radius:999px; }
+        .inv-proposal { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#6366f1; background:rgba(99,102,241,.12); border:1px solid rgba(99,102,241,.35); padding:1px 7px; border-radius:999px; }
         .inv-ptitle { font-weight:600; font-size:14px; }
         .inv-bbody { border-top:1px solid var(--line); padding:12px 14px; }
+        .rec-block { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:12px; background:rgba(99,102,241,.05); }
+        .rec-head { font-size:12px; font-weight:700; margin-bottom:6px; }
+        .rec-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+        .rec-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+        .rec-need { font-weight:500; flex:0 0 auto; }
+        .rec-to { color:var(--muted); min-width:0; } .rec-to code { font-size:11px; }
+        .rec-add { font-size:11px; padding:2px 12px; margin-left:auto; flex:0 0 auto; }
         .cart-list { list-style:none; margin:0 0 10px; padding:0; display:flex; flex-direction:column; gap:6px; }
         .cart-list li { position:relative; font-size:13px; padding-right:22px; }
         .cl-sku { font-size:11px; margin-left:6px; }

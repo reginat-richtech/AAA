@@ -19,7 +19,10 @@ export async function POST(req, { params }) {
   const b = await req.json().catch(() => ({}));
   const project_id = b.project_id ? String(b.project_id) : null;
   if (!project_id) return NextResponse.json({ error: 'Pick a project.' }, { status: 400 });
-  const proj = (await query('select id from ops.legal_agreement where id::text = $1', [project_id])).rows[0];
+  // A project may be an agreement OR a proposal-only entry (no agreement yet), so
+  // the inventory team can prep from the proposal before the agreement lands.
+  let proj = (await query('select id from ops.legal_agreement where id::text = $1', [project_id])).rows[0];
+  if (!proj) { try { proj = (await query('select id from ops.project_proposal where id::text = $1', [project_id])).rows[0]; } catch { /* 0170 not migrated */ } }
   if (!proj) return NextResponse.json({ error: 'Project not found.' }, { status: 400 });
 
   const qn = Number(String(b.quantity ?? '').trim());

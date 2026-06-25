@@ -7,7 +7,8 @@ const EMPTY_ROBOT = { name: '', robot_type: '', service_type: '', quantity: 1, u
 export default function DataUpload() {
   const [meta, setMeta] = useState({ models: [], service_types: [], agreement_types: [] });
   const [list, setList] = useState([]);
-  const [up, setUp] = useState({ salesman_name: '', salesman_email: '', deal_id: '', file: null });
+  const [up, setUp] = useState({ salesman_name: '', salesman_email: '', deal_id: '', contract: '', file: null });
+  const [editable, setEditable] = useState(true);   // false → finalized, admin-only
   const [cur, setCur] = useState(null);          // loaded agreement (with .extracted)
   const [fields, setFields] = useState(null);    // editable headline fields
   const [robots, setRobots] = useState([]);      // editable robots
@@ -17,6 +18,15 @@ export default function DataUpload() {
   useEffect(() => {
     fetch('/api/data-upload/robot-models').then((r) => r.json()).then(setMeta).catch(() => {});
     loadList();
+    // Prefill the salesperson when arriving from a proposal's "Upload agreement"
+    // link (?sales_name=&sales_email=). The inputs stay editable.
+    const sp = new URLSearchParams(window.location.search);
+    const sName = sp.get('sales_name') || '';
+    const sEmail = sp.get('sales_email') || '';
+    const contract = sp.get('contract') || '';
+    if (sName || sEmail || contract) {
+      setUp((s) => ({ ...s, salesman_name: sName || s.salesman_name, salesman_email: sEmail || s.salesman_email, contract: contract || s.contract }));
+    }
   }, []);
   function loadList() {
     fetch('/api/data-upload').then((r) => r.json()).then((d) => setList(d.agreements || [])).catch(() => {});
@@ -34,6 +44,7 @@ export default function DataUpload() {
       salesman_name: a.salesman_name || '', salesman_email: a.salesman_email || '', deal_id: a.deal_id || '',
     });
     setRobots(Array.isArray(a.extracted?.robots) ? a.extracted.robots.map((r) => ({ ...EMPTY_ROBOT, ...r })) : []);
+    setEditable(a.editable !== false);   // finalized + non-admin → read-only
   }
 
   async function analyze(e) {
@@ -45,15 +56,20 @@ export default function DataUpload() {
     fd.append('salesman_name', up.salesman_name);
     fd.append('salesman_email', up.salesman_email);
     fd.append('deal_id', up.deal_id);
+    fd.append('contract', up.contract);
     const r = await fetch('/api/data-upload', { method: 'POST', body: fd });
-    const j = await r.json(); setBusy(false);
-    if (!r.ok) { setMsg({ err: j.error || 'Upload failed' }); return; }
+    const j = await r.json().catch(() => ({})); setBusy(false);
+    if (!r.ok) { setMsg({ err: j.error || `Upload failed (HTTP ${r.status})` }); return; }
     loadList();
-    if (j.status === 'error') setMsg({ err: `Saved, but extraction failed: ${j.error}` });
-    else setMsg({ ok: `Extracted ${j.project_number}. Review and save below.` });
+    const n = j.notify || {};
+    const notifyNote = n.sent ? ` ✉️ Tech Request link emailed to ${n.to}.`
+      : n.error ? ` ⚠️ Couldn't email the salesperson (${n.error}).`
+      : n.skipped ? ` (Salesperson not emailed: ${n.skipped}.)` : '';
+    if (j.status === 'error') setMsg({ err: `Saved, but extraction failed: ${j.error}.${notifyNote}` });
+    else setMsg({ ok: `Extracted ${j.project_number}. Review and save below.${notifyNote}` });
     // fetch full detail (with extracted) for editing
-    const detail = await (await fetch(`/api/data-upload/${j.id}`)).json();
-    loadAgreement(detail);
+    const detail = await (await fetch(`/api/data-upload/${j.id}`)).json().catch(() => null);
+    if (detail) loadAgreement(detail);
   }
 
   const setF = (k, v) => setFields((s) => ({ ...s, [k]: v }));
@@ -65,8 +81,8 @@ export default function DataUpload() {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...fields, robots }),
     });
-    const j = await r.json(); setBusy(false);
-    if (!r.ok) { setMsg({ err: j.error || 'Save failed' }); return; }
+    const j = await r.json().catch(() => ({})); setBusy(false);
+    if (!r.ok) { setMsg({ err: j.error || `Save failed (HTTP ${r.status})` }); return; }
     setMsg({ ok: 'Saved to database.' }); loadList(); loadAgreement(j);
   }
 
@@ -78,15 +94,15 @@ export default function DataUpload() {
         <div>
           <div className="panel">
             <form className="form" onSubmit={analyze}>
-              <label>Agreement PDF
-                <input type="file" accept="application/pdf"
+              <label>Agreement PDF *
+                <input type="file" accept="application/pdf" required
                   onChange={(e) => setUp((s) => ({ ...s, file: e.target.files?.[0] || null }))} />
               </label>
               <div className="row2">
-                <label>Salesman name<input value={up.salesman_name} onChange={(e) => setUp((s) => ({ ...s, salesman_name: e.target.value }))} /></label>
-                <label>Salesman email<input value={up.salesman_email} onChange={(e) => setUp((s) => ({ ...s, salesman_email: e.target.value }))} /></label>
+                <label>Salesman name *<input value={up.salesman_name} required onChange={(e) => setUp((s) => ({ ...s, salesman_name: e.target.value }))} /></label>
+                <label>Salesman email *<input type="email" value={up.salesman_email} required onChange={(e) => setUp((s) => ({ ...s, salesman_email: e.target.value }))} /></label>
               </div>
-              <label>HubSpot deal ID<input value={up.deal_id} onChange={(e) => setUp((s) => ({ ...s, deal_id: e.target.value }))} /></label>
+              <label>HubSpot deal ID *<input value={up.deal_id} required onChange={(e) => setUp((s) => ({ ...s, deal_id: e.target.value }))} /></label>
               <div><button disabled={busy}>{busy ? 'Analyzing…' : 'Analyze document'}</button></div>
               {msg?.ok && <p className="ok-msg">{msg.ok}</p>}{msg?.err && <p className="error">{msg.err}</p>}
             </form>
@@ -95,6 +111,8 @@ export default function DataUpload() {
           {cur && fields && (
             <div className="panel">
               <h2 style={{ marginTop: 0 }}>Review — {cur.project_number} <span className={'chip ' + (cur.status === 'ready' ? 'ok' : 'bad')}>{cur.status}</span></h2>
+              {!editable && <p className="error">🔒 This agreement is finalized — only an admin can edit it.</p>}
+              <fieldset disabled={!editable} style={{ border: 0, padding: 0, margin: 0, minInlineSize: 'auto' }}>
               <div className="form">
                 <label>Agreement type
                   <select value={fields.agreement_type} onChange={(e) => setF('agreement_type', e.target.value)}>
@@ -145,8 +163,10 @@ export default function DataUpload() {
                 </div>
                 <div><button type="button" className="secondary" onClick={() => setRobots((rs) => [...rs, { ...EMPTY_ROBOT }])}>+ Add robot</button></div>
 
-                <div style={{ marginTop: 8 }}><button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save to database'}</button></div>
+                {editable && <p className="note" style={{ marginTop: 8 }}>Saving finalizes this agreement; afterward only an admin can edit it.</p>}
+                <div style={{ marginTop: 8 }}><button onClick={save} disabled={busy || !editable}>{busy ? 'Saving…' : 'Save to database'}</button></div>
               </div>
+              </fieldset>
             </div>
           )}
         </div>
