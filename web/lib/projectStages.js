@@ -146,7 +146,12 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
         return proposalTasks(proposal);
       case 'agreement':
         return [
-          task('Agreement PDF uploaded', !!a.filename, a.filename),
+          task('Agreement PDF uploaded', !!a.filename, null, null,
+            a.filename ? {
+              name: a.filename,
+              preview: `/api/data-upload/${a.id}/file`,
+              download: `/api/data-upload/${a.id}/file?dl=1`,
+            } : null),
           task('AI extraction', a.status === 'ready', a.status === 'ready' ? a.extract_method : a.error),
           task('Salesman assigned', !!(a.salesman_name || a.salesman_email), a.salesman_name || a.salesman_email),
         ];

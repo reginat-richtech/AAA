@@ -4,7 +4,7 @@ import { requireUser, canSee } from '../../../../../lib/access';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request, { params }) {
+export async function GET(request, { params }) {
   const { user, response } = await requireUser();
   if (response) return response;
   const { id } = await params;
@@ -13,10 +13,13 @@ export async function GET(_request, { params }) {
   );
   const row = rows[0];
   if (!row || !canSee(user, row) || !row.source_pdf) return new Response('not found', { status: 404 });
+  // ?dl=1 → download (attachment); default → inline preview.
+  const dl = new URL(request.url).searchParams.get('dl');
+  const name = (row.filename || 'document.pdf').replace(/"/g, '');
   return new Response(row.source_pdf, {
     headers: {
       'Content-Type': row.content_type || 'application/pdf',
-      'Content-Disposition': `inline; filename="${(row.filename || 'document.pdf').replace(/"/g, '')}"`,
+      'Content-Disposition': `${dl ? 'attachment' : 'inline'}; filename="${name}"`,
     },
   });
 }
