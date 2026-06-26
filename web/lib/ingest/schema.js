@@ -197,6 +197,11 @@ export async function ensureExtSchema() {
     -- Kanban (ported from old PM tracker): column position + sort order; status derives from column.
     alter table ext.task add column if not exists column_id text;
     alter table ext.task add column if not exists position  integer;
+    -- Team-Preparation "mark done" attribution (who/when) for the auto_key prep steps
+    -- (the Project Tracker's Stage 6 Approve buttons → /api/project-tracker/prep).
+    alter table ext.task add column if not exists done_by_email text;
+    alter table ext.task add column if not exists done_by_name  text;
+    alter table ext.task add column if not exists done_at       timestamptz;
     update ext.task set status = 'in_progress' where status = 'blocked';
     update ext.task set priority = 'medium' where priority = 'normal';
 

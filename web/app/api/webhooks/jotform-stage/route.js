@@ -21,6 +21,30 @@ async function resolveAgreementBySo(rawSo) {
   return null;
 }
 
+// Parse the On-site Customer Checklist/Confirmation form (260087161684056) into the
+// fields Stage 8 (Installation & Closure) reads. answers = getJotformSubmission shape.
+function parseInstallation(answers) {
+  const a = answers || {};
+  const byName = {};
+  for (const x of Object.values(a)) if (x && x.name) byName[x.name] = x;
+  const val = (x) => (x ? String(x.prettyFormat ?? x.answer ?? '').trim() : '');
+  const fullname = (x) => { const v = x?.answer; return v && typeof v === 'object' ? [v.first, v.last].filter(Boolean).join(' ').trim() : String(v || '').trim(); };
+  const signed = (x) => !!(x && x.answer && String(x.answer).trim());
+  const anyChecked = (...names) => names.some((n) => { const v = byName[n]?.answer; return Array.isArray(v) ? v.length > 0 : !!(v && String(v).trim()); });
+  return {
+    so_number: val(byName.so),
+    technician: fullname(byName.technicianName) || val(byName.email52),
+    client: fullname(byName.clientName),
+    customer_email: val(byName.customerEmail),
+    robot_model: val(byName.robotModel) || val(byName.robotType),
+    status: val(byName.status),
+    date: val(byName.date) || val(byName.date38),
+    customer_signed: signed(byName.customersSignature),
+    technician_signed: signed(byName.techniciansSignature),
+    checklist_done: anyChecked('checklist', 'checklist27', 'checklist32', 'checklist49'),
+  };
+}
+
 // Records a JotForm workflow stage event (idempotent on submission_id + stage).
 // Accepts POST (normal JotForm delivery) AND GET (JotForm "GET" webhooks + the
 // connection test). Point a webhook here with ?stage=<name>.
@@ -108,6 +132,19 @@ async function handle(request) {
          parsed.destination || null, parsed.purpose || null, parsed.start_date || null, parsed.end_date || null,
          trStatus, agreement_id,
          JSON.stringify(f.ok ? f.answers : payload)],
+      );
+    } else if (String(stage).startsWith('install') || String(stage) === 'closure') {
+      // On-site Customer Checklist/Confirmation → Stage 8 (Installation & Closure).
+      // Read the submission back and store the parsed report (incl SO for matching)
+      // so the tracker can mark "Onsite installation" done and surface the details.
+      const f = await getJotformSubmission(submission_id);
+      const report = f.ok ? parseInstallation(f.answers) : {};
+      if (!report.so_number) report.so_number = String(pick('so_number', 'so') || '').trim();
+      await query(
+        `insert into ops.jotform_stage_event (form_id, submission_id, stage, payload)
+         values ($1,$2,'installation',$3)
+         on conflict (submission_id, stage) do update set payload = excluded.payload, received_at = now()`,
+        [form_id, submission_id, JSON.stringify(report)],
       );
     } else {
       await query(
