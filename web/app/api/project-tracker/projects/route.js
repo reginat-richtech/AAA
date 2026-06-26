@@ -15,7 +15,11 @@ export async function GET() {
 
   const agreements = (await query(
     `select id, project_number, filename, status, error, extract_method, agreement_type, title,
-            counterparty, robot_types, robot_count, salesman_name, salesman_email, contract_number, created_at
+            counterparty, robot_types, robot_count, salesman_name, salesman_email, contract_number, created_at,
+            extracted_json->>'client_contact_name' as client_contact_name,
+            extracted_json->>'client_email'        as client_email,
+            extracted_json->>'client_phone'        as client_phone,
+            extracted_json->>'client_address'      as client_address
      from ops.legal_agreement where ${vis.sql} order by created_at desc limit 300`,
     vis.params
   )).rows;
@@ -53,6 +57,17 @@ export async function GET() {
   const approvedSubIds = new Set(Object.keys(latest).filter((k) => latest[k].stage === 'approved'));
   const deniedSubIds = new Set(Object.keys(latest).filter((k) => latest[k].stage === 'denied'));
 
+  // Onsite installation reports (Stage 8 — On-site Customer Checklist/Confirmation),
+  // matched by normalized SO; latest per SO wins. Captured by the jotform-stage
+  // webhook (?stage=installation).
+  const installBySo = {};
+  try {
+    const installEv = (await query(
+      `select payload, received_at from ops.jotform_stage_event where stage = 'installation' order by received_at desc`
+    )).rows;
+    for (const e of installEv) { const k = normSo(e.payload?.so_number); if (k && !(k in installBySo)) installBySo[k] = e.payload; }
+  } catch { /* ignore */ }
+
   // Final Proposal Form submissions — the project's entry point (they precede
   // the agreement). Latest per normalized customer name wins for best-effort
   // matching to an agreement; unmatched ones become standalone stage-0 projects.
@@ -61,7 +76,7 @@ export async function GET() {
   let proposals = [];
   try {
     proposals = (await query(
-      `select id, project_number, contract_number, project_name, customer_name, customer_email,
+      `select id, submission_id, project_number, contract_number, project_name, customer_name, customer_email,
               sales_name, sales_email, deployment_url, site_survey_url, packing_list_url,
               site_survey_done, predeploy_review_done, project_info, package_list, created_at
        from ops.project_proposal order by created_at desc`
@@ -118,7 +133,8 @@ export async function GET() {
     const proposal = (a.contract_number && propByContract[normSo(a.contract_number)])
       || propByCustomer[normName(a.counterparty)] || null;
     if (proposal) matchedProposalIds.add(proposal.id);
-    return buildProject(a, sub, conf, approvedSubIds, proposal, deniedSubIds, prepFor(a.id));
+    const install = so ? installBySo[normSo(so)] || null : null;
+    return buildProject(a, sub, conf, approvedSubIds, proposal, deniedSubIds, prepFor(a.id), install);
   });
 
   // Unmatched proposals stand on their own as stage-0 entry points (owner = the

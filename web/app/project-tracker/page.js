@@ -135,7 +135,7 @@ export default function ProjectTracker() {
                     {n.tasks.map((t, j) => (
                       <div className="tleaf" key={j}>
                         <span className="s">{LEAF_ICON[t.status]}</span>
-                        <span>{t.label}{t.detail ? <span className="d"> — {t.detail}</span> : null}{t.doc ? <> · <a href={t.doc.preview} target="_blank" rel="noreferrer" title="Preview document">{t.doc.name}</a> · <a href={t.doc.download} title="Download document">Download</a></> : t.url ? <> · <a href={t.url} target="_blank" rel="noreferrer">link</a></> : null}</span>
+                        <span>{t.label}{t.detail ? <span className="d"> — {t.detail}</span> : null}{t.doc ? <> · <a href={t.doc.preview} target="_blank" rel="noreferrer" title="Preview document">{t.doc.name}</a> · <a href={t.doc.download} title="Download document">Download</a></> : t.url ? <> · <a href={t.url} target="_blank" rel="noreferrer">{String(t.url).includes('jotform') ? 'JotForm ↗' : 'link'}</a></> : null}</span>
                         {t.prep_key && (t.can_mark
                           ? <button className={`btn-sm${t.status === 'done' ? ' secondary' : ''}`} style={{ marginLeft: 8 }} disabled={busy}
                               onClick={(e) => { e.stopPropagation(); t.status === 'done' ? markPrep(p, t) : setConfirmReq({ p, t }); }}>

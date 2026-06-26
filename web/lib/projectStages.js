@@ -68,6 +68,10 @@ const docFor = (proposalId, key, url) => (proposalId && url ? {
   download: `/api/proposal-file/${proposalId}?doc=${key}&dl=1`,
 } : null);
 
+// Viewable JotForm submission link from a submission id (NOT the api.jotform.com
+// resource URL, which 401s in a browser). Used to link JotForm-sourced steps.
+export const jotformUrl = (subId) => (subId ? `https://www.jotform.com/submission/${subId}` : null);
+
 // Final Proposal Form checklist, computed from a captured ops.project_proposal
 // row (or null when no proposal is linked to this project yet → all pending).
 function proposalTasks(proposal) {
@@ -76,6 +80,9 @@ function proposalTasks(proposal) {
   const pkg = (p && p.package_list) || [];
   const pkgText = pkg.map((x) => `${Number(x.quantity) > 1 ? `${x.quantity}× ` : ''}${x.item}`).join(', ');
   return [
+    task('Submitted on JotForm', !!(p && p.submission_id),
+      p && p.submission_id ? 'open the original proposal submission' : null,
+      jotformUrl(p && p.submission_id)),
     task('Customer information', !!(p && (p.customer_name || p.customer_email)),
       p ? ([p.customer_name, p.customer_email].filter(Boolean).join(' · ') || null) : null),
     task('Project information & requirements', !!(p && p.project_info),
@@ -94,7 +101,7 @@ function proposalTasks(proposal) {
   ];
 }
 
-export function buildProject(a, submission, confirmation, approvedSubmissionIds = new Set(), proposal = null, deniedSubmissionIds = new Set(), prep = null) {
+export function buildProject(a, submission, confirmation, approvedSubmissionIds = new Set(), proposal = null, deniedSubmissionIds = new Set(), prep = null, install = null) {
   const ann = (submission && submission.answers) || {};
   const appr = ann._approval || null;
   const cal = ann._calendar || null;
@@ -156,6 +163,10 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
               download: `/api/data-upload/${a.id}/file?dl=1`,
             } : null),
           task('AI extraction', a.status === 'ready', a.status === 'ready' ? a.extract_method : a.error),
+          task('Customer (extracted)', !!(a.counterparty || a.client_contact_name),
+            [a.counterparty, a.client_contact_name].filter(Boolean).join(' · ') || null),
+          task('Customer contact (extracted)', !!(a.client_email || a.client_phone || a.client_address),
+            [a.client_email, a.client_phone, a.client_address].filter(Boolean).join(' · ') || null),
           task('Salesman assigned', !!(a.salesman_name || a.salesman_email), a.salesman_name || a.salesman_email),
         ];
       case 'invoice':
@@ -200,11 +211,25 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
         return [
           task('Technicians assigned', confApproved, (confPayload.technicians || []).join(', ') || null),
           task('Confirmation form approved', confApproved,
-            confDenied ? '❌ Denied in JotForm — resubmit to re-confirm' : (confApproved ? (confPayload.team || null) : null)),
+            confDenied ? '❌ Denied in JotForm — resubmit to re-confirm' : (confApproved ? (confPayload.team || null) : null),
+            jotformUrl(conf?.submission_id)),
           task('Technicians arrival date set', confApproved && !!confPayload.fly_out, confPayload.fly_out ? `out ${confPayload.fly_out} → back ${confPayload.fly_back || '?'}` : null),
         ];
-      case 'closure':
-        return [task('Onsite installation', null), task('Install checklist', null), task('Customer sign-off', null), task('Project complete', null)];
+      case 'closure': {
+        // Driven by the On-site Customer Checklist/Confirmation form (captured via
+        // the jotform-stage webhook, matched by SO). Until a report lands, the
+        // checklist/sign-off/complete leaves stay "manual"; "Onsite installation"
+        // is a real pending→done item.
+        const inst = install || null;
+        const complete = /complete|pass|success|finish|done/i.test(inst?.status || '');
+        return [
+          task('Onsite installation', !!inst,
+            inst ? [inst.technician, inst.date].filter(Boolean).join(' · ') || 'reported' : null),
+          task('Install checklist', inst ? !!inst.checklist_done : null, inst?.status || null),
+          task('Customer sign-off', inst ? !!inst.customer_signed : null, inst?.customer_signed ? 'signed' : null),
+          task('Project complete', inst ? complete : null, inst ? (inst.status || null) : null),
+        ];
+      }
       case 'finance':
         return [
           task('Final invoice issued & sent', null),
@@ -257,7 +282,7 @@ export function buildProposalProject(proposal) {
     salesman_name: p.sales_name || null, salesman_email: p.sales_email || null,
     so_number: '', created_at: p.created_at,
     stage: stageIdx, stage_key: 'proposal',
-    jotform_url: null, calendar_link: null, is_proposal_only: true,
+    jotform_url: jotformUrl(p.submission_id), calendar_link: null, is_proposal_only: true,
     nodes,
   };
 }
