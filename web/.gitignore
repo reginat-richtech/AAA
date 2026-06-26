@@ -3,3 +3,7 @@ node_modules/
 .env.local
 uploads/
 *.log
+
+# Service-account keys & other secrets — never commit the real key.
+secrets/*
+!secrets/README.md
