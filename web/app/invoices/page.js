@@ -119,7 +119,7 @@ export default function Invoices() {
         <PageHeader title="Invoices" sub="Create a QuickBooks-style invoice — pick a customer (or link a project to autofill), add line items, confirm, then push to QuickBooks." sheet="Invoices" />
         <div className="toolbar">
           <button onClick={() => { setForm(blankForm()); setMsg(null); }}>+ New invoice</button>
-          {!data.qb?.connected && <span className="note" style={{ color: '#a16207' }}>QuickBooks not connected — drafting works; push needs Connect QuickBooks.</span>}
+          {!data.qb?.connected && <span className="note" style={{ color: '#a16207' }}>QuickBooks not connected — drafting works; to push, <a href="/api/quickbooks/connect">Connect QuickBooks ↗</a>.</span>}
           <span className="note" style={{ marginLeft: 'auto' }}>{data.invoices.length} invoice(s)</span>
         </div>
         <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
@@ -160,7 +160,7 @@ export default function Invoices() {
         {form.confirmed_by && status !== 'draft' && <span className="note">confirmed by {form.confirmed_by}</span>}
       </div>
       {msg && <p className="note" style={{ color: msg.err ? '#dc2626' : '#16a34a' }}>{msg.err || msg.text}</p>}
-      {!data.qb?.connected && <p className="note" style={{ color: '#a16207' }}>⚠ QuickBooks not connected — drafting & confirming work; <b>push</b> needs an admin to Connect QuickBooks first.</p>}
+      {!data.qb?.connected && <p className="note" style={{ color: '#a16207' }}>⚠ QuickBooks not connected — drafting & confirming work; to <b>push</b>, an admin must <a href="/api/quickbooks/connect">Connect QuickBooks ↗</a> first (this is separate from a Data Sync).</p>}
 
       <div className="panel inv-form">
         <div className="inv-row">
