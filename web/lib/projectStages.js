@@ -273,7 +273,11 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
 
   const nodes = PROJECT_STAGES.map((s, i) => ({
     ...s,
-    status: !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
+    // The Invoice stage isn't part of the tracked workflow, but light its bubble
+    // up as DONE once an invoice exists (created in-app or connected from QuickBooks).
+    status: s.key === 'invoice'
+      ? (projInvoices.length ? 'done' : 'manual')
+      : !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
     tasks: tasksFor(s.key),
   }));
 
@@ -312,7 +316,9 @@ export function buildProposalProject(proposal, invoices = []) {
   PROJECT_STAGES.forEach((s, i) => { if (s.tracked && done[s.key]) stageIdx = i; });
   const nodes = PROJECT_STAGES.map((s, i) => ({
     ...s,
-    status: !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
+    status: s.key === 'invoice'
+      ? (projInvoices.length ? 'done' : 'manual')
+      : !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
     tasks: s.key === 'proposal' ? proposalTasks(p) : (s.key === 'invoice' ? invTasks : []),
   }));
   return {

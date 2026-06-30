@@ -331,7 +331,11 @@ async function pushToQb(inv, user) {
     ...(inv.customer_email ? { BillEmail: { Address: inv.customer_email } } : {}),
     ...(inv.invoice_date ? { TxnDate: String(inv.invoice_date).slice(0, 10) } : {}),
     ...(inv.due_date ? { DueDate: String(inv.due_date).slice(0, 10) } : {}),
-    ...(inv.invoice_number ? { DocNumber: String(inv.invoice_number).slice(0, 21) } : {}),
+    // No DocNumber on purpose: this QuickBooks company auto-numbers invoices as "SO####"
+    // ("Custom transaction numbers" is OFF), so we let QuickBooks assign the next number
+    // and capture it below — pushed invoices continue the SO#### series rather than the
+    // app's internal INV-#### placeholder. (To force a custom number instead, QB's
+    // "Custom transaction numbers" setting must be ON and we'd send DocNumber here.)
     ...(memo ? { CustomerMemo: { value: memo.slice(0, 1000) } } : {}),
     ...(priv ? { PrivateNote: priv.slice(0, 4000) } : {}),
   };
@@ -342,7 +346,9 @@ async function pushToQb(inv, user) {
   }
   const row = await mutateAs(user.email, async (q) => {
     const { rows } = await q(
-      `update ops.invoice set status='pushed', qb_invoice_id=$2, qb_doc_number=$3, push_error=null, pushed_at=now(), updated_at=now() where id=$1 returning ${INV_COLS}`,
+      `update ops.invoice set status='pushed', qb_invoice_id=$2, qb_doc_number=$3,
+         invoice_number=coalesce($3, invoice_number), push_error=null, pushed_at=now(), updated_at=now()
+       where id=$1 returning ${INV_COLS}`,
       [inv.id, out.data?.Invoice?.Id || null, out.data?.Invoice?.DocNumber || null],
     );
     return rows[0];
