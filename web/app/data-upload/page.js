@@ -1,13 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { PageHeader } from '../_components/blueprint';
 
 const EMPTY_ROBOT = { name: '', robot_type: '', service_type: '', quantity: 1, unit_price: null };
 
 export default function DataUpload() {
+  const router = useRouter();
   const [meta, setMeta] = useState({ models: [], service_types: [], agreement_types: [] });
   const [list, setList] = useState([]);
-  const [up, setUp] = useState({ salesman_name: '', salesman_email: '', deal_id: '', contract: '', file: null });
+  const [up, setUp] = useState({ salesman_name: '', salesman_email: '', contract: '', file: null });
   const [editable, setEditable] = useState(true);   // false → finalized, admin-only
   const [cur, setCur] = useState(null);          // loaded agreement (with .extracted)
   const [fields, setFields] = useState(null);    // editable headline fields
@@ -55,7 +57,6 @@ export default function DataUpload() {
     fd.append('file', up.file);
     fd.append('salesman_name', up.salesman_name);
     fd.append('salesman_email', up.salesman_email);
-    fd.append('deal_id', up.deal_id);
     fd.append('contract', up.contract);
     const r = await fetch('/api/data-upload', { method: 'POST', body: fd });
     const j = await r.json().catch(() => ({})); setBusy(false);
@@ -88,6 +89,9 @@ export default function DataUpload() {
 
   return (
     <>
+      <div style={{ marginBottom: 12 }}>
+        <button type="button" className="secondary" onClick={() => router.back()}>← Back</button>
+      </div>
       <PageHeader title="Data Upload" sub="Upload an agreement PDF → AI extracts the fields → review & edit → save." sheet="Data Upload" />
 
       <div className="split">
@@ -102,7 +106,6 @@ export default function DataUpload() {
                 <label>Salesman name *<input value={up.salesman_name} required onChange={(e) => setUp((s) => ({ ...s, salesman_name: e.target.value }))} /></label>
                 <label>Salesman email *<input type="email" value={up.salesman_email} required onChange={(e) => setUp((s) => ({ ...s, salesman_email: e.target.value }))} /></label>
               </div>
-              <label>HubSpot deal ID *<input value={up.deal_id} required onChange={(e) => setUp((s) => ({ ...s, deal_id: e.target.value }))} /></label>
               <div><button disabled={busy}>{busy ? 'Analyzing…' : 'Analyze document'}</button></div>
               {msg?.ok && <p className="ok-msg">{msg.ok}</p>}{msg?.err && <p className="error">{msg.err}</p>}
             </form>

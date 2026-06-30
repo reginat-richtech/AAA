@@ -4,28 +4,51 @@ import { useState } from 'react';
 // A type-to-search dropdown combobox. `options` = [{ key, label, sub, data }].
 // Typing filters by label+sub; clicking an option calls onPick(option).
 //
-// Default: free text is allowed (onChange fires on every keystroke) so you can also
-// type a new value.
+// Default (free mode): free text is allowed — onChange fires on every keystroke,
+// so the field can also hold a typed value.
 //
-// selectOnly: the field can ONLY hold a value chosen from `options`. Typing just
-// filters/searches the list (onSearch fires for live/server-side search) and the
-// committed value is set ONLY via onPick — any unpicked text is discarded on blur.
-export default function ComboSearch({ value, onChange, options = [], onPick, placeholder, disabled, selectOnly = false, onSearch }) {
+// selectOnly: the field can ONLY hold a value chosen from `options`. Once a value
+// is committed it shows as a LOCKED chip (NOT an editable input) — to change it the
+// user clicks "Change" and must pick another option from the list. Typing only
+// searches (onSearch fires for live/server-side search); the value is committed
+// solely via onPick, so free text can never become the value. onClear (optional)
+// resets the committed value and shows a ✕ on the chip.
+export default function ComboSearch({ value, onChange, options = [], onPick, onClear, placeholder, disabled, selectOnly = false, onSearch }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');   // selectOnly: the live search text (separate from the committed value)
+  const [query, setQuery] = useState('');       // live search text (selectOnly)
+  const [editing, setEditing] = useState(false); // selectOnly: searching vs showing the locked value
 
-  // Shown in the box: in selectOnly mode the search text while open, else the
-  // committed value; in free mode always the committed value.
-  const shown = selectOnly ? (open ? query : (value || '')) : (value || '');
+  // selectOnly with a committed value → locked display, never a free-text input.
+  if (selectOnly && value && !editing) {
+    return (
+      <div className="combo">
+        <div className="combo-selected">
+          <span className="combo-selected-val" title={value}>{value}</span>
+          {!disabled && (
+            <span className="combo-selected-actions">
+              <button type="button" className="combo-change"
+                onClick={() => { setQuery(''); setEditing(true); setOpen(true); onSearch?.(''); }}>Change</button>
+              {onClear && <button type="button" className="combo-clear" title="Clear" onClick={() => onClear()}>✕</button>}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // selectOnly while searching shows the query; free mode always shows the value.
+  const shown = selectOnly ? query : (value || '');
   const q = String(shown).toLowerCase();
   const matches = (!q ? options : options.filter((o) => `${o.label} ${o.sub || ''}`.toLowerCase().includes(q))).slice(0, 40);
 
   const type = (text) => {
     setOpen(true);
-    if (selectOnly) { setQuery(text); onSearch?.(text); }   // search only — do NOT commit
+    if (selectOnly) { setQuery(text); onSearch?.(text); }   // search only — never commit free text
     else { onChange?.(text); }
   };
-  const pick = (o) => { onPick?.(o); setOpen(false); if (selectOnly) setQuery(''); };
+  const pick = (o) => { onPick?.(o); setOpen(false); if (selectOnly) { setQuery(''); setEditing(false); } };
+  // Leaving the search box without picking discards the typed text (selectOnly).
+  const leave = () => { setOpen(false); if (selectOnly) { setQuery(''); setEditing(false); } };
 
   return (
     <div className="combo">
@@ -34,9 +57,10 @@ export default function ComboSearch({ value, onChange, options = [], onPick, pla
         disabled={disabled}
         placeholder={placeholder}
         autoComplete="off"
+        autoFocus={selectOnly && editing}
         onChange={(e) => type(e.target.value)}
-        onFocus={() => { if (selectOnly) setQuery(value || ''); setOpen(true); }}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(leave, 150)}
       />
       {open && !disabled && matches.length > 0 && (
         <div className="combo-drop">

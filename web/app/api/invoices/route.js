@@ -261,11 +261,14 @@ async function pushToQb(inv, user) {
   const safe = custName.replace(/['\\]/g, ' ');
   let r = await qbApiRequest(`/query?query=${encodeURIComponent(`select * from Customer where DisplayName = '${safe}'`)}`);
   if (r.error) return NextResponse.json({ error: r.error }, { status: 502 });
-  let customerId = r.data?.QueryResponse?.Customer?.[0]?.Id;
+  // Customers are SELECT-ONLY: the invoice must use an EXISTING QuickBooks customer.
+  // We never create a new one here — if there's no exact DisplayName match, stop and
+  // tell the user to pick a real QuickBooks customer from the dropdown.
+  const customerId = r.data?.QueryResponse?.Customer?.[0]?.Id;
   if (!customerId) {
-    const c = await qbApiRequest('/customer', { method: 'POST', body: { DisplayName: custName, ...(inv.customer_email ? { PrimaryEmailAddr: { Address: inv.customer_email } } : {}) } });
-    if (c.error) return NextResponse.json({ error: `Create customer: ${c.error}` }, { status: 502 });
-    customerId = c.data?.Customer?.Id;
+    return NextResponse.json({
+      error: `"${custName}" isn't an existing QuickBooks customer, so this invoice can't be pushed. Open the invoice and pick a customer from the QuickBooks dropdown — pushing will not create a new customer.`,
+    }, { status: 422 });
   }
   // Each line uses its own QB item (picked from the price list) when set; otherwise
   // fall back to the first available item (looked up only if needed).

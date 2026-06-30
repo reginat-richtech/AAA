@@ -27,6 +27,8 @@ export default function ProjectTracker() {
   const [invPicker, setInvPicker] = useState(null); // project id whose invoice-picker is open
   const [invQ, setInvQ] = useState('');
   const [invResults, setInvResults] = useState([]);
+  const [invQbConnected, setInvQbConnected] = useState(false);
+  const invTimer = useRef(null);
 
   const refresh = () => fetch('/api/project-tracker/projects').then((r) => r.json()).then(setData).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -99,28 +101,41 @@ export default function ProjectTracker() {
     } finally { setBusy(false); }
   }
 
-  // Connect an EXISTING invoice to this project (QuickBooks Invoice stage): search
-  // ops.invoice and set its project_id. Unlink clears it. Admin/sales/finance only.
-  async function loadInvoices(qstr) {
-    setInvQ(qstr);
+  // Connect an EXISTING invoice to this project (QuickBooks Invoice stage). The picker
+  // lists BOTH the app's invoices AND live QuickBooks invoices; connecting a QB one
+  // imports it into ops.invoice. Search hits the QB API, so it's debounced.
+  async function fetchInvoices(qstr) {
     const r = await fetch(`/api/project-tracker/connect-invoice?q=${encodeURIComponent(qstr)}`);
     const d = await r.json().catch(() => ({}));
     setInvResults(d.invoices || []);
+    setInvQbConnected(!!d.qb_connected);
   }
-  function openInvPicker(projectId) { setInvPicker(projectId); setInvResults([]); loadInvoices(''); }
-  async function connectInvoice(p, invoiceId, unlink = false) {
+  function loadInvoices(qstr) {
+    setInvQ(qstr);
+    clearTimeout(invTimer.current);
+    invTimer.current = setTimeout(() => fetchInvoices(qstr), 300);
+  }
+  function openInvPicker(projectId) { setInvPicker(projectId); setInvResults([]); setInvQ(''); fetchInvoices(''); }
+  async function postConnect(p, payload, okMsg) {
     setBusy(true); setMsg(null);
     try {
       const r = await fetch('/api/project-tracker/connect-invoice', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: unlink ? null : p.id, invoice_id: invoiceId }),
+        body: JSON.stringify(payload),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setMsg({ pid: p.id, err: j.error || `Failed (HTTP ${r.status})` }); return; }
       setInvPicker(null); await refresh();
-      setMsg({ pid: p.id, text: unlink ? 'Invoice unlinked.' : 'Invoice connected.' });
+      setMsg({ pid: p.id, text: okMsg });
     } finally { setBusy(false); }
   }
+  // iv = a picker row (source 'app' | 'quickbooks').
+  const connectInvoice = (p, iv) => postConnect(
+    p,
+    iv.source === 'quickbooks' ? { project_id: p.id, qb_invoice_id: iv.qb_invoice_id } : { project_id: p.id, invoice_id: iv.id },
+    iv.source === 'quickbooks' ? `Imported ${iv.number || 'QB invoice'} from QuickBooks & connected.` : 'Invoice connected.',
+  );
+  const unlinkInvoice = (p, invoiceId) => postConnect(p, { project_id: null, invoice_id: invoiceId }, 'Invoice unlinked.');
 
   const projects = data.projects.filter((p) => {
     if (!q) return true;
@@ -163,6 +178,7 @@ export default function ProjectTracker() {
           .deal-row:nth-child(even) { background:rgba(29,78,216,.04); }
           .inv-link-box { margin:8px 0 4px 22px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:rgba(234,179,8,.07); font-size:12.5px; }
           .inv-link-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:3px 0; }
+          .inv-qb-tag { display:inline-block; font-size:10px; font-weight:800; color:#0f7a3d; background:rgba(45,168,89,.14); border:1px solid rgba(45,168,89,.4); border-radius:4px; padding:0 4px; margin-right:6px; vertical-align:1px; }
         `}</style>
       </section>
 
@@ -276,32 +292,36 @@ export default function ProjectTracker() {
                                   {iv.customer_name ? <span className="note"> · {iv.customer_name}</span> : null}
                                   {iv.total ? <span className="note"> · ${Number(iv.total).toLocaleString()}</span> : null}
                                   <span className="note"> · {iv.status}</span></span>
-                                <button className="btn-sm secondary" disabled={busy} onClick={(e) => { e.stopPropagation(); connectInvoice(p, iv.id, true); }}>Unlink</button>
+                                <button className="btn-sm secondary" disabled={busy} onClick={(e) => { e.stopPropagation(); unlinkInvoice(p, iv.id); }}>Unlink</button>
                               </div>
                             ))}
                           </div>
                         )}
                         {invPicker !== p.id ? (
-                          <button className="btn-sm" disabled={busy} onClick={(e) => { e.stopPropagation(); openInvPicker(p.id); }}>🔗 Connect existing invoice</button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                            <button className="btn-sm" disabled={busy} onClick={(e) => { e.stopPropagation(); openInvPicker(p.id); }}>🔗 Connect existing invoice</button>
+                            <a href={`/invoices?project=${encodeURIComponent(p.id)}`} target="_blank" rel="noreferrer">+ New invoice for this project ↗</a>
+                          </div>
                         ) : (
                           <div className="deal-picker" onClick={(e) => e.stopPropagation()}>
-                            <input autoFocus placeholder="Search invoices by #, customer…" value={invQ} onChange={(e) => loadInvoices(e.target.value)} />
+                            <input autoFocus placeholder={invQbConnected ? 'Search app + QuickBooks invoices by #, customer…' : 'Search invoices by #, customer…'} value={invQ} onChange={(e) => loadInvoices(e.target.value)} />
                             <div className="deal-results">
                               {invResults.length ? invResults.map((iv) => {
-                                const here = iv.project_id === p.id;
+                                const qbSrc = iv.source === 'quickbooks';
+                                const here = iv.source === 'app' && iv.project_id === p.id;
                                 return (
-                                  <div className="deal-row" key={iv.id}>
-                                    <span>{iv.number || '(draft)'}
+                                  <div className="deal-row" key={iv.id || `qb-${iv.qb_invoice_id}`}>
+                                    <span>{qbSrc ? <span className="inv-qb-tag">QB</span> : null}{iv.number || '(draft)'}
                                       {iv.customer_name ? <span className="note"> · {iv.customer_name}</span> : null}
                                       {iv.total ? <span className="note"> · ${Number(iv.total).toLocaleString()}</span> : null}
-                                      {iv.project_id && !here ? <span className="note"> · ⚠ linked to {iv.project_number || 'another project'}</span> : null}</span>
-                                    <button className="btn-sm" disabled={busy || here} onClick={(e) => { e.stopPropagation(); connectInvoice(p, iv.id); }}>{here ? 'Linked' : (iv.project_id ? 'Move here' : 'Use')}</button>
+                                      {iv.source === 'app' && iv.project_id && !here ? <span className="note"> · ⚠ linked to {iv.project_number || 'another project'}</span> : null}</span>
+                                    <button className="btn-sm" disabled={busy || here} onClick={(e) => { e.stopPropagation(); connectInvoice(p, iv); }}>{here ? 'Linked' : qbSrc ? 'Import & use' : (iv.project_id ? 'Move here' : 'Use')}</button>
                                   </div>
                                 );
-                              }) : <p className="note" style={{ margin: '4px 0' }}>No invoices match — create one in the Invoices page first.</p>}
+                              }) : <p className="note" style={{ margin: '4px 0' }}>{invQ ? 'No matching invoices.' : 'No invoices yet.'} <a href={`/invoices?project=${encodeURIComponent(p.id)}`} target="_blank" rel="noreferrer">create one for this project ↗</a></p>}
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <a href="/invoices" target="_blank" rel="noreferrer">Manage invoices ↗</a>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span className="note">{invQbConnected ? 'Listing app + live QuickBooks invoices' : 'QuickBooks not connected — app invoices only'}</span>
                               <button className="btn-sm secondary" onClick={(e) => { e.stopPropagation(); setInvPicker(null); }}>Cancel</button>
                             </div>
                           </div>

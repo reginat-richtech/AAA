@@ -196,6 +196,76 @@ export async function qbSearchCustomers(qstr) {
   return { customers };
 }
 
+// Compact QB Invoice → picker row.
+const qbInvoiceRow = (inv) => ({
+  qb_invoice_id: String(inv.Id),
+  doc_number: inv.DocNumber || null,
+  customer_name: inv.CustomerRef?.name || null,
+  customer_email: inv.BillEmail?.Address || null,
+  total: inv.TotalAmt != null ? Number(inv.TotalAmt) : 0,
+  balance: inv.Balance != null ? Number(inv.Balance) : null,
+  txn_date: inv.TxnDate || null,
+});
+
+// Search QuickBooks invoices for the tracker's "connect existing QB invoice" picker.
+// QB has thousands of invoices, so: empty q → most-recent 50; otherwise match by
+// DocNumber (LIKE) AND by customer name (resolve customer ids, then CustomerRef IN …).
+// `select *` because QB rejects sub-entities (BillEmail/BillAddr) in a column list.
+export async function qbSearchInvoices(qstr) {
+  const safe = String(qstr || '').replace(/['\\%_]/g, ' ').trim();
+  if (!safe) {
+    const r = await qbApiRequest(`/query?query=${encodeURIComponent('select * from Invoice ORDERBY TxnDate DESC maxresults 50')}`);
+    if (r.error) return { error: r.error, invoices: [] };
+    return { invoices: (r.data?.QueryResponse?.Invoice || []).map(qbInvoiceRow) };
+  }
+  const byId = {};
+  const d = await qbApiRequest(`/query?query=${encodeURIComponent(`select * from Invoice where DocNumber like '%${safe}%' ORDERBY TxnDate DESC maxresults 25`)}`);
+  for (const inv of (d.data?.QueryResponse?.Invoice || [])) byId[inv.Id] = inv;
+  const custIds = ((await qbSearchCustomers(safe)).customers || []).map((c) => c.id).slice(0, 10);
+  if (custIds.length) {
+    const inClause = custIds.map((id) => `'${String(id).replace(/'/g, '')}'`).join(',');
+    const cq = await qbApiRequest(`/query?query=${encodeURIComponent(`select * from Invoice where CustomerRef in (${inClause}) ORDERBY TxnDate DESC maxresults 25`)}`);
+    for (const inv of (cq.data?.QueryResponse?.Invoice || [])) byId[inv.Id] = inv;
+  }
+  return { invoices: Object.values(byId).map(qbInvoiceRow) };
+}
+
+// One full QB invoice by Id, mapped to the ops.invoice shape (for import-on-connect).
+export async function qbGetInvoice(id) {
+  const r = await qbApiRequest(`/invoice/${encodeURIComponent(String(id))}`);
+  if (r.error) return { error: r.error, invoice: null };
+  const inv = r.data?.Invoice;
+  if (!inv) return { invoice: null };
+  const lines = (inv.Line || [])
+    .filter((l) => l.DetailType === 'SalesItemLineDetail')
+    .map((l) => {
+      const d = l.SalesItemLineDetail || {};
+      return {
+        product_name: d.ItemRef?.name || l.Description || null,
+        description: l.Description || null,
+        sku: null,
+        quantity: d.Qty != null ? Number(d.Qty) : 1,
+        unit_price: d.UnitPrice != null ? Number(d.UnitPrice) : 0,
+        amount: l.Amount != null ? Number(l.Amount) : null,
+        taxable: d.TaxCodeRef?.value ? d.TaxCodeRef.value !== 'NON' : true,
+        cn_sku_id: null,
+        qb_item_id: d.ItemRef?.value ? String(d.ItemRef.value) : null,
+      };
+    });
+  return { invoice: {
+    qb_invoice_id: String(inv.Id),
+    qb_doc_number: inv.DocNumber || null,
+    customer_name: inv.CustomerRef?.name || null,
+    customer_email: inv.BillEmail?.Address || null,
+    billing_address: qbAddr(inv.BillAddr),
+    shipping_address: qbAddr(inv.ShipAddr),
+    invoice_date: inv.TxnDate || null,
+    due_date: inv.DueDate || null,
+    total: inv.TotalAmt != null ? Number(inv.TotalAmt) : 0,
+    lines,
+  } };
+}
+
 // The QuickBooks item/price list: { items: [{id, name, sku, unit_price, type}] }.
 // Used to price invoice lines and to reference the real QB item on push.
 export async function qbFetchItems() {

@@ -66,6 +66,19 @@ export default function Invoices() {
   const load = () => fetch('/api/invoices').then((r) => r.json()).then((d) => { if (d?.error) setErr(d.error); else setData(d); }).catch(() => {});
   useEffect(() => { load(); }, []);
 
+  // Deep link: /invoices?project=<id> → open a NEW invoice already linked to that
+  // project (autofills customer + lines). Used by the Project Tracker's
+  // "+ New invoice for this project" link so an empty connect-picker isn't a dead end.
+  const seededFromUrl = useRef(false);
+  useEffect(() => {
+    if (seededFromUrl.current) return;
+    seededFromUrl.current = true;
+    const pid = new URLSearchParams(window.location.search).get('project');
+    if (!pid) return;
+    setForm(blankForm()); setSuggest(null); setLineInfo(null); setMsg(null);
+    linkProject(pid);
+  }, []);
+
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setLine = (i, k, v) => setForm((f) => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, [k]: v } : l)) }));
   // Qty/Rate edits recompute Amount; editing Amount back-calculates Rate (QuickBooks-style).
@@ -229,7 +242,7 @@ export default function Invoices() {
 
       <div className="panel inv-form">
         <div className="inv-row">
-          <label className="inv-grow">Customer<ComboSearch selectOnly value={form.customer_name} disabled={!editable} placeholder="Search and pick a QuickBooks customer…" options={customerOptions} onSearch={searchCustomers} onPick={pickCustomer} />{recRow('customer_name')}</label>
+          <label className="inv-grow">Customer<ComboSearch selectOnly value={form.customer_name} disabled={!editable} placeholder="Search and pick a QuickBooks customer…" options={customerOptions} onSearch={searchCustomers} onPick={pickCustomer} onClear={() => set('customer_name', '')} />{recRow('customer_name')}</label>
           <label className="inv-grow">Customer email<input value={form.customer_email} disabled={!editable} onChange={(e) => set('customer_email', e.target.value)} />{recRow('customer_email')}</label>
           <label>Link project (autofill)<select value={form.project_id} disabled={!editable} onChange={(e) => linkProject(e.target.value)}><option value="">— none —</option>{data.projects.map((p) => <option key={p.id} value={p.id}>{p.project_number} · {p.counterparty || p.title}</option>)}</select></label>
         </div>
@@ -238,7 +251,7 @@ export default function Invoices() {
           <label className="inv-grow">Shipping address<textarea rows={3} value={form.shipping_address} disabled={!editable} onChange={(e) => set('shipping_address', e.target.value)} />{recRow('shipping_address')}</label>
         </div>
         <div className="inv-row">
-          <label>Invoice #<input value={form.invoice_number || ''} disabled readOnly placeholder={form.id ? '' : 'Assigned on save'} /></label>
+          <label>Invoice #<input value={form.invoice_number || ''} disabled={!editable} placeholder="Auto INV-#### if blank — or type e.g. TEST-001" onChange={(e) => set('invoice_number', e.target.value)} /></label>
           <label>Invoice date<input type="date" value={form.invoice_date} disabled={!editable} onChange={(e) => set('invoice_date', e.target.value)} /></label>
           <label>Due date<input type="date" value={form.due_date} disabled={!editable} onChange={(e) => set('due_date', e.target.value)} /></label>
           <label>Terms<select value={form.terms} disabled={!editable} onChange={(e) => set('terms', e.target.value)}>{TERMS.map((x) => <option key={x} value={x}>{x || '—'}</option>)}</select></label>
@@ -249,7 +262,7 @@ export default function Invoices() {
         </div>
         <div className="inv-row">
           <label style={{ minWidth: 200 }}>Class{(data.qbClasses?.length) ? <span className="note" style={{ fontWeight: 400 }}> · from QuickBooks</span> : null}
-            <ComboSearch selectOnly value={form.class_name || ''} disabled={!editable} placeholder="Pick a class…" options={classOptions} onPick={(o) => set('class_name', o.data)} />
+            <ComboSearch selectOnly value={form.class_name || ''} disabled={!editable} placeholder="Pick a class…" options={classOptions} onPick={(o) => set('class_name', o.data)} onClear={() => set('class_name', '')} />
           </label>
           <label className="inv-grow">Tags
             <div className="inv-tags">
