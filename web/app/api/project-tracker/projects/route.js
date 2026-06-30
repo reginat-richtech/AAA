@@ -172,6 +172,10 @@ export async function GET() {
   const counts = {};
   for (const s of PROJECT_STAGES) counts[s.key] = 0;
   for (const p of allProjects) counts[p.stage_key] = (counts[p.stage_key] || 0) + 1;
+  // The Invoice stage isn't a tracked/linear step, so no project's stage_key is
+  // 'invoice'. Surface a real number on the top rail = projects that have an invoice
+  // (created in-app or connected/imported from QuickBooks).
+  counts.invoice = allProjects.filter((p) => (p.invoices || []).length > 0).length;
 
   return NextResponse.json({ stages: PROJECT_STAGES, projects: allProjects, counts, count: allProjects.length });
 }

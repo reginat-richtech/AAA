@@ -37,7 +37,9 @@ export function StageRail({ stages, counts = {} }) {
         const occupied = n > 0;
         const isFirst = i === 0;
         const isLast = i === stages.length - 1;
-        const nodeStyle = s.tracked
+        // Tracked stages always fill; a reference stage (e.g. Invoice) fills too
+        // once it actually has projects, so it reads as active rather than empty.
+        const nodeStyle = (s.tracked || occupied)
           ? { background: s.color, borderColor: s.color }
           : { background: '#fff', borderColor: s.color };
         if (occupied) nodeStyle.boxShadow = `0 0 0 4px ${hexA(s.color, 0.22)}`;
