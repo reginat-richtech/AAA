@@ -55,7 +55,6 @@ export function StageRail({ stages, counts = {} }) {
             <div className="rail-meta">
               <span className="rail-step" style={{ color: s.color }}>{String(i + 1).padStart(2, '0')}</span>
               <span className="rail-name">{s.label}</span>
-              {!s.tracked && <span className="pill-ref">ref</span>}
               <span className="rail-cnt" style={{ color: occupied ? s.color : 'var(--muted)' }}>{n}</span>
             </div>
           </div>

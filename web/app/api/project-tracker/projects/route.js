@@ -79,15 +79,26 @@ export async function GET() {
     for (const s of shipRows) shipByProject[String(s.project_id)] = s;
   } catch { /* ops.shipment not migrated yet */ }
 
+  // QuickBooks payment status for pushed invoices: balance 0 (status 'paid') means the
+  // customer paid. The QB ingest already mirrors every invoice (with balance) into
+  // ext.quickbooks_invoice, so we just read it here. Separate best-effort lookup so a
+  // missing/empty mirror (e.g. QB never connected, or the local DB) never hides invoices.
+  const qbPaidById = {};
+  try {
+    const paidRows = (await query('select id, balance, status from ext.quickbooks_invoice')).rows;
+    for (const r of paidRows) qbPaidById[String(r.id)] = r.status === 'paid' || (r.balance != null && Number(r.balance) <= 0);
+  } catch { /* ext.quickbooks_invoice not present — treat all as unpaid */ }
+
   // Invoices connected to each project (ops.invoice.project_id = agreement/proposal id).
   // Surfaced on the QuickBooks Invoice stage; people connect an existing invoice here.
+  // qb_paid = this invoice is settled in QuickBooks (drives Stage 9 auto-completion).
   const invByProject = {};
   try {
     const invRows = (await query(
-      `select id::text as id, project_id, invoice_number, qb_doc_number, customer_name, status, lines, created_at
+      `select id::text as id, project_id, invoice_number, qb_doc_number, qb_invoice_id, customer_name, status, lines, created_at
          from ops.invoice where project_id is not null order by created_at`
     )).rows;
-    for (const r of invRows) { (invByProject[String(r.project_id)] ||= []).push(r); }
+    for (const r of invRows) { r.qb_paid = !!(r.qb_invoice_id && qbPaidById[String(r.qb_invoice_id)]); (invByProject[String(r.project_id)] ||= []).push(r); }
   } catch { /* ops.invoice not migrated yet */ }
 
   // Final Proposal Form submissions — the project's entry point (they precede
@@ -167,12 +178,15 @@ export async function GET() {
   });
 
   // Unmatched proposals stand on their own as stage-0 entry points (owner = the
-  // salesperson; admins see all), listed ahead of agreement-rooted projects.
+  // salesperson; admins see all).
   const proposalOnly = proposals
     .filter((p) => !matchedProposalIds.has(p.id))
     .filter((p) => user.isAdmin || (p.sales_email && p.sales_email.toLowerCase() === user.email))
     .map((p) => buildProposalProject(p, invByProject[String(p.id)] || []));
-  const allProjects = [...proposalOnly, ...projects];
+  // Order every project (proposal-only + agreement-rooted) together by the time it
+  // was created, newest first — a single chronological list rather than two groups.
+  const projTs = (p) => (p.created_at ? new Date(p.created_at).getTime() : 0);
+  const allProjects = [...proposalOnly, ...projects].sort((a, b) => projTs(b) - projTs(a));
 
   const counts = {};
   for (const s of PROJECT_STAGES) counts[s.key] = 0;
@@ -181,6 +195,9 @@ export async function GET() {
   // 'invoice'. Surface a real number on the top rail = projects that have an invoice
   // (created in-app or connected/imported from QuickBooks).
   counts.invoice = allProjects.filter((p) => (p.invoices || []).length > 0).length;
+  // Stage 9 (Finance) is a reference stage too; light its overview bubble with the
+  // count of fully-closed projects (Stage 8 installed AND a connected invoice paid).
+  counts.finance = allProjects.filter((p) => p.nodes.find((n) => n.key === 'finance')?.status === 'done').length;
 
   return NextResponse.json({ stages: PROJECT_STAGES, projects: allProjects, counts, count: allProjects.length });
 }

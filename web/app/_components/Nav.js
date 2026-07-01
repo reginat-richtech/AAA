@@ -6,7 +6,8 @@ import { prefetchAi } from '../../lib/aiCache';
 
 const WORKFLOW = [
   { href: '/project-tracker', label: 'Project Tracker', icon: 'list' },
-  { href: '/travel-requests', label: 'Travel Requests', icon: 'plane' },
+  // Travel Requests hidden from the nav for now (page still works at /travel-requests).
+  // { href: '/travel-requests', label: 'Travel Requests', icon: 'plane' },
   { href: '/tasks', label: 'Task Tracking', icon: 'check' },
   { href: '/inventory', label: 'Inventory', icon: 'box' },
   { href: '/invoices', label: 'Invoices', icon: 'receipt' },

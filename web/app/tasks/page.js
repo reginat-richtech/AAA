@@ -267,9 +267,9 @@ export default function Tasks() {
             </div>
             <label className="pm-f">Description<textarea rows={4} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} disabled={!canWrite} /></label>
             <div className="pm-mactions">
+              {canWrite && <button className="pm-del" onClick={() => deleteTask(edit.id)} disabled={busy}>Delete</button>}
+              <button className="secondary" style={{ marginLeft: 'auto' }} onClick={() => setEdit(null)}>Close</button>
               {canWrite && <button onClick={saveTask} disabled={busy || !edit.title.trim()}>Save</button>}
-              {canWrite && <button className="secondary" onClick={() => deleteTask(edit.id)} disabled={busy} style={{ marginLeft: 'auto' }}>Delete</button>}
-              <button className="secondary" onClick={() => setEdit(null)}>Close</button>
             </div>
           </div>
         </div>
@@ -389,6 +389,8 @@ export default function Tasks() {
         .pm-f input, .pm-f select, .pm-f textarea { width:100%; }
         .pm-frow { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
         .pm-mactions { display:flex; gap:8px; margin-top:18px; }
+        .pm-del { background:#dc2626; color:#fff; border:1px solid #dc2626; }
+        .pm-del:hover:not(:disabled) { background:#b91c1c; border-color:#b91c1c; }
         .pm-members { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
         .pm-members li { display:flex; align-items:center; gap:8px; font-size:13px; }
         .pm-rm { border:0; background:transparent; color:var(--muted); cursor:pointer; }

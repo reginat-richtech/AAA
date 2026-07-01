@@ -91,8 +91,12 @@ export const SCHEMA_EVENT = [
   ] },
 ];
 
-export const formTypeFor = (agreementType) =>
-  agreementType === 'Event Rental Agreement' ? 'event' : 'installation';
+// Step 4 uses ONE form for every project: the Technician Request Form
+// (SCHEMA_TECH / JotForm 212985540502151). Its Request Type already has an
+// "Event (fill out the event form too)" option, so event agreements go through the
+// Technician Request Form as well — instead of being diverted to the Event/Rental
+// entry form.
+export const formTypeFor = () => 'installation';
 export const schemaFor = (agreementType) =>
   formTypeFor(agreementType) === 'event' ? SCHEMA_EVENT : SCHEMA_TECH;
 export const fieldsFlat = (schema) => schema.flatMap((s) => s.fields);
@@ -174,14 +178,6 @@ export function buildJotformPayload(agreementType, answers) {
   }
   if (formTypeFor(agreementType) === 'event') payload['submission[105]'] = 'Yes'; // "Is This Form Finalized?"
   return { payload, skipped };
-}
-
-// Manager routing on approval.
-export function scheduleLeaderFor(agreementType, answers) {
-  if (formTypeFor(agreementType) === 'event') return 'xinyu.z@richtechsystem.com';
-  const robots = answers.robot_types || [];
-  if (robots.some((r) => /scorpion|adam/i.test(r))) return 'justin.k@richtechsystem.com';
-  return 'regina.t@richtechsystem.com';
 }
 
 export function scheduleDateFor(agreementType, answers) {

@@ -23,6 +23,7 @@ export default function Inventory() {
   const [skipped, setSkipped] = useState({}); // "<projectId>::<item>" → true (dismissed recommendation, session-only)
 
   const [ship, setShip] = useState({}); // project_id → shipping project (shipment + autofill)
+  const [checkoutMsg, setCheckoutMsg] = useState({}); // project_id → { text, ok } — shown next to that card's checkout button
   const load = () => {
     fetch('/api/inventory/cart').then((r) => r.json()).then((d) => { if (d && !d.error) setData(d); }).catch(() => {});
     fetch('/api/shipping').then((r) => r.json()).then((d) => {
@@ -89,16 +90,24 @@ export default function Inventory() {
   // Check out a project's cart (consume stock + lock) or reopen it (restore stock).
   // Inventory manager / admin only; shared with the Project Tracker's Shipping step.
   async function checkout(p, doCheckout) {
-    setBusy(true); setMsg('');
-    const res = await fetch('/api/inventory/checkout', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ project_id: p.id, proposal_id: p.proposal_id || null, reopen: !doCheckout }),
-    });
-    const j = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (res.ok) { setMsg(doCheckout ? '✓ Checked out — stock updated, cart locked' : 'Reopened — stock restored'); load(); }
-    else if (j.short) { setMsg('✗ Not enough stock: ' + j.short.map((s) => `${s.product_name} needs ${s.needed}, ${s.available} on hand`).join('; ')); }
-    else { setMsg(j.error || 'Checkout failed'); }
+    setBusy(true);
+    setCheckoutMsg((m) => ({ ...m, [p.id]: null })); // clear this card's prior message
+    let text = '', ok = false;
+    try {
+      const res = await fetch('/api/inventory/checkout', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project_id: p.id, proposal_id: p.proposal_id || null, reopen: !doCheckout }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { ok = true; text = doCheckout ? '✓ Checked out — stock updated, cart locked' : 'Reopened — stock restored'; load(); }
+      else if (j.short) { text = '✗ Not enough stock: ' + j.short.map((s) => `${s.product_name} needs ${s.needed}, ${s.available} on hand`).join('; '); }
+      else { text = '✗ ' + (j.error || 'Checkout failed'); }
+    } catch {
+      text = '✗ Network error — could not reach the server. Try again.';
+    } finally {
+      setBusy(false);
+    }
+    setCheckoutMsg((m) => ({ ...m, [p.id]: { text, ok } }));
   }
 
   const modalCart = addModal ? (cartByProject[addModal.project_id] || []) : [];
@@ -194,6 +203,11 @@ export default function Inventory() {
                   ) : !p.is_proposal ? (
                     <span className="note">Not checked out yet.</span>
                   ) : null}
+                  {checkoutMsg[p.id] && (
+                    <span className="inv-confirm-msg" style={{ color: checkoutMsg[p.id].ok ? '#16a34a' : '#dc2626' }}>
+                      {checkoutMsg[p.id].text}
+                    </span>
+                  )}
                 </div>
 
                 {/* Inline shipping — appears once the project is checked out */}
@@ -307,6 +321,7 @@ export default function Inventory() {
         .inv-confirm-btn { background:#16a34a; }
         .inv-confirm-btn:hover { background:#15803d; }
         .inv-confirm-note { font-size:13px; color:#15803d; font-weight:600; display:inline-flex; align-items:center; gap:10px; }
+        .inv-confirm-msg { display:block; margin-top:8px; font-size:13px; font-weight:600; line-height:1.4; }
         .inv-undo { font-size:11px; padding:2px 10px; background:var(--chip); color:var(--ink); border:1px solid var(--line); }
         .inv-undo:hover { background:#e2ecf9; }
         .inv-ship { margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); }
