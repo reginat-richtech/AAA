@@ -42,16 +42,17 @@ const toForm = (iv) => ({
 
 export default function Invoices() {
   const [data, setData] = useState({ invoices: [], projects: [], qb: {}, canEdit: false });
+  const [loaded, setLoaded] = useState(false); // first /api/invoices fetch done → QB status is known (avoids a false "not connected" flash)
   const [form, setForm] = useState(null);   // null = list view; object = editing
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
-  const [prodQ, setProdQ] = useState(''); // product search box
   const [tagInput, setTagInput] = useState('');
   const [qbCust, setQbCust] = useState([]); // live QuickBooks customer-search results
   const [suggest, setSuggest] = useState(null); // per-field source suggestions from the linked project
   const [lineInfo, setLineInfo] = useState(null); // {fixed, count} — inventory lines autofilled from the project
   const custTimer = useRef(null);
+  const savedRef = useRef(null); // JSON snapshot of the last saved/loaded form → detects unsaved edits
 
   // Debounced server-side QuickBooks customer search (2000+ customers → not preloaded).
   function searchCustomers(qstr) {
@@ -63,8 +64,12 @@ export default function Invoices() {
     }, 300);
   }
 
-  const load = () => fetch('/api/invoices').then((r) => r.json()).then((d) => { if (d?.error) setErr(d.error); else setData(d); }).catch(() => {});
+  const load = () => fetch('/api/invoices').then((r) => r.json()).then((d) => { if (d?.error) setErr(d.error); else setData(d); }).catch(() => {}).finally(() => setLoaded(true));
   useEffect(() => { load(); }, []);
+
+  // Open/replace the editor form and snapshot it as the saved baseline, so `dirty`
+  // (unsaved edits) starts false. Pass null to return to the list view.
+  const openForm = (f) => { savedRef.current = f ? JSON.stringify(f) : null; setForm(f); };
 
   // Deep link: /invoices?project=<id> → open a NEW invoice already linked to that
   // project (autofills customer + lines). Used by the Project Tracker's
@@ -75,9 +80,22 @@ export default function Invoices() {
     seededFromUrl.current = true;
     const pid = new URLSearchParams(window.location.search).get('project');
     if (!pid) return;
-    setForm(blankForm()); setSuggest(null); setLineInfo(null); setMsg(null);
+    openForm(blankForm()); setSuggest(null); setLineInfo(null); setMsg(null);
     linkProject(pid);
   }, []);
+
+  // Deep link: /invoices?id=<invoiceId> → open that existing invoice's detail once
+  // the list has loaded. Lets links elsewhere (e.g. the Project Tracker's Invoice
+  // stage) point people straight to an invoice's detail.
+  const openedFromUrl = useRef(false);
+  useEffect(() => {
+    if (openedFromUrl.current || !data.invoices.length) return;
+    const iid = new URLSearchParams(window.location.search).get('id');
+    if (!iid) { openedFromUrl.current = true; return; }
+    const iv = data.invoices.find((x) => String(x.id) === String(iid));
+    if (iv) { openForm(toForm(iv)); setSuggest(null); setLineInfo(null); setMsg(null); }
+    openedFromUrl.current = true;
+  }, [data.invoices]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setLine = (i, k, v) => setForm((f) => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, [k]: v } : l)) }));
@@ -114,7 +132,6 @@ export default function Invoices() {
     for (const c of qbCust) { const k = String(c.name || '').toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push({ key: `q-${c.id}`, label: c.name, sub: [c.email, 'QuickBooks'].filter(Boolean).join(' · '), data: c }); } }
     return out;
   })();
-  const productSearchOptions = productOptions.map((p) => ({ key: p.key, label: p.name, sub: [p.sku, p.unit_price != null ? money(p.unit_price) : null].filter(Boolean).join(' · '), data: p }));
   // Project Manager options = QB custom-field names + QB employees, deduped.
   const pmNames = [...new Set([...(data.qbProjectManagers || []), ...((data.qbEmployees || []).map((e) => e.name))])].filter(Boolean);
   const pmOptions = pmNames.map((n, i) => ({ key: `pm-${i}`, label: n, sub: '', data: n }));
@@ -130,15 +147,29 @@ export default function Invoices() {
       shipping_address: c.address || f.shipping_address,
     }));
   }
-  // Pick a product from the dropdown → add it as a line (QB price prefilled if available).
-  function addProductOption(o) {
-    const p = o.data; if (!p) return;
-    setForm((f) => {
-      const blank = (l) => !l.product_name && !l.description && !l.sku && !(Number(l.unit_price) > 0);
-      const base = f.lines.length === 1 && blank(f.lines[0]) ? [] : f.lines;
-      return { ...f, lines: [...base, { service_date: '', product_name: p.name, description: '', quantity: 1, unit_price: p.unit_price ?? 0, amount: (p.unit_price ?? 0), taxable: true, sku: p.sku, cn_sku_id: p.cn_sku_id, qb_item_id: p.qb_item_id }] };
-    });
-    setProdQ('');
+  // In-row product search: each line's Product/Service and SKU boxes are type-to-search
+  // fields (native <datalist>). Picking a suggestion sets the exact name/SKU, which we
+  // match back to a product here and use to fill the whole line — including the QB rate.
+  function fillLineFromProduct(i, p) {
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, j) => {
+        if (j !== i) return l;
+        const price = p.unit_price != null ? p.unit_price : (Number(l.unit_price) || 0); // QB item → its price; inventory item → keep
+        const qty = Number(l.quantity) || 0;
+        return { ...l, product_name: p.name, sku: p.sku ?? l.sku, unit_price: price, amount: qty * price, qb_item_id: p.qb_item_id ?? null, cn_sku_id: p.cn_sku_id ?? null };
+      }),
+    }));
+  }
+  // Typing in a line's Product/Service box — fill the line if the text exactly matches a product, else keep as free text.
+  function onProductType(i, v) {
+    const m = productOptions.find((p) => (p.name || '').toLowerCase() === v.trim().toLowerCase());
+    if (m) fillLineFromProduct(i, m); else setLine(i, 'product_name', v);
+  }
+  // Typing in a line's SKU box — the SKU drives the product lookup (fills name + QB rate), else free text.
+  function onSkuType(i, v) {
+    const m = productOptions.find((p) => (p.sku || '').toLowerCase() === v.trim().toLowerCase());
+    if (m) fillLineFromProduct(i, m); else setLine(i, 'sku', v);
   }
 
   async function linkProject(pid) {
@@ -160,13 +191,25 @@ export default function Invoices() {
     const j = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) { setMsg({ err: j.error || 'Failed' }); return; }
-    if (action === 'delete') { setForm(null); load(); return; }
-    setForm(toForm(j));
+    if (action === 'delete') { openForm(null); load(); return; }
+    openForm(toForm(j));
     setMsg({ text: action === 'confirm' ? '✓ Confirmed' : action === 'push' ? '✓ Pushed to QuickBooks' : action === 'reopen' ? 'Reopened' : '✓ Saved' });
     load();
   }
 
   if (err) return (<><PageHeader title="Invoices" sheet="Invoices" /><div className="panel"><p className="note">{err}</p></div></>);
+
+  // QuickBooks connection status line — three states so it no longer flashes a false
+  // "not connected" while the first fetch is in flight. `full` = the detailed
+  // form-view message; otherwise the compact list-view note.
+  const qbBanner = (full) => {
+    const Tag = full ? 'p' : 'span';
+    if (!loaded) return <Tag className="note" style={{ color: 'var(--muted)' }}>⏳ Checking QuickBooks connection…</Tag>;
+    if (data.qb?.connected) return <Tag className="note" style={{ color: '#15803d' }}>✓ QuickBooks connected{data.qb?.company ? ` · ${data.qb.company}` : ''} — invoices can be pushed.</Tag>;
+    return full
+      ? <p className="note" style={{ color: '#a16207' }}>⚠ QuickBooks not connected — drafting & confirming work; to <b>push</b>, an admin must <a href="/api/quickbooks/connect">Connect QuickBooks ↗</a> first (this is separate from a Data Sync).</p>
+      : <span className="note" style={{ color: '#a16207' }}>QuickBooks not connected — drafting works; to push, <a href="/api/quickbooks/connect">Connect QuickBooks ↗</a>.</span>;
+  };
 
   // ── LIST VIEW ──
   if (!form) {
@@ -174,8 +217,8 @@ export default function Invoices() {
       <>
         <PageHeader title="Invoices" sub="Create a QuickBooks-style invoice — pick a customer (or link a project to autofill), add line items, confirm, then push to QuickBooks." sheet="Invoices" />
         <div className="toolbar">
-          <button onClick={() => { setForm(blankForm()); setSuggest(null); setLineInfo(null); setMsg(null); }}>+ New invoice</button>
-          {!data.qb?.connected && <span className="note" style={{ color: '#a16207' }}>QuickBooks not connected — drafting works; to push, <a href="/api/quickbooks/connect">Connect QuickBooks ↗</a>.</span>}
+          <button onClick={() => { openForm(blankForm()); setSuggest(null); setLineInfo(null); setMsg(null); }}>+ New invoice</button>
+          {qbBanner(false)}
           <span className="note" style={{ marginLeft: 'auto' }}>{data.invoices.length} invoice(s)</span>
         </div>
         <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
@@ -185,7 +228,7 @@ export default function Invoices() {
               {data.invoices.map((iv) => {
                 const t = calc(iv);
                 return (
-                  <tr key={iv.id} onClick={() => { setForm(toForm(iv)); setSuggest(null); setLineInfo(null); setMsg(null); }} style={{ cursor: 'pointer' }}>
+                  <tr key={iv.id} onClick={() => { openForm(toForm(iv)); setSuggest(null); setLineInfo(null); setMsg(null); }} style={{ cursor: 'pointer' }}>
                     <td>{iv.invoice_number || iv.qb_doc_number || <span className="note">—</span>}</td>
                     <td>{iv.customer_name || <span className="note">—</span>}</td>
                     <td>{iv.invoice_date ? String(iv.invoice_date).slice(0, 10) : <span className="note">—</span>}</td>
@@ -206,6 +249,10 @@ export default function Invoices() {
   const t = calc(form);
   const status = form.status || 'draft';
   const editable = status !== 'pushed';
+  // Unsaved edits vs the last saved snapshot. Push sends the SAVED row (the server
+  // pushes the DB record, not the posted form), so block Push until edits are saved
+  // — otherwise QuickBooks would silently receive the old, pre-edit invoice.
+  const dirty = savedRef.current !== null && JSON.stringify(form) !== savedRef.current;
   // One-click source suggestions under a field (only when sources actually differ).
   // The Final Proposal Form is the default; HubSpot / Agreement are alternatives.
   const recRow = (field) => {
@@ -231,14 +278,14 @@ export default function Invoices() {
     <>
       <PageHeader title="Invoices" sheet="Invoices" />
       <div className="toolbar">
-        <button className="secondary" onClick={() => { setForm(null); load(); }}>← All invoices</button>
+        <button className="secondary" onClick={() => { openForm(null); load(); }}>← All invoices</button>
         <span className={`inv-st s-${status}`}>{status}</span>
         {form.qb_doc_number && <span className="note">QB invoice #{form.qb_doc_number}</span>}
         {form.confirmed_by && status !== 'draft' && <span className="note">confirmed by {form.confirmed_by}</span>}
         {form.project_id && <a href={`/project-tracker?open=${encodeURIComponent(form.project_id)}`} target="_blank" rel="noreferrer" style={{ marginLeft: 'auto' }}>📋 Open in Project Tracker ↗</a>}
       </div>
       {msg && <p className="note" style={{ color: msg.err ? '#dc2626' : '#16a34a' }}>{msg.err || msg.text}</p>}
-      {!data.qb?.connected && <p className="note" style={{ color: '#a16207' }}>⚠ QuickBooks not connected — drafting & confirming work; to <b>push</b>, an admin must <a href="/api/quickbooks/connect">Connect QuickBooks ↗</a> first (this is separate from a Data Sync).</p>}
+      {qbBanner(true)}
 
       <div className="panel inv-form">
         <div className="inv-row">
@@ -273,13 +320,6 @@ export default function Invoices() {
           <datalist id="inv-tagsugg">{existingTags.map((t, i) => <option key={i} value={t} />)}</datalist>
         </div>
 
-        {editable && (
-          <div className="inv-row">
-            <label className="inv-grow" style={{ maxWidth: 460 }}>Add a product{qbPriced ? <span className="note" style={{ fontWeight: 400 }}> · prices from QuickBooks</span> : null}
-              <ComboSearch value={prodQ} placeholder="🔍 Search products by name or SKU…" options={productSearchOptions} onChange={setProdQ} onPick={addProductOption} />
-            </label>
-          </div>
-        )}
         {lineInfo && (
           <p className={`inv-linenote${lineInfo.fixed ? ' fixed' : ''}`}>
             {lineInfo.fixed
@@ -288,6 +328,15 @@ export default function Invoices() {
             {' '}Set rates below{!data.qb?.connected ? '' : ' (or pick a product to pull its QuickBooks price)'}.
           </p>
         )}
+        {editable && (
+          <p className="note" style={{ margin: '2px 0 6px' }}>🔍 Type in a line’s <b>Product / Service</b> or <b>SKU</b> box to search products — pick a suggestion to fill the line{qbPriced ? ' and pull its QuickBooks price' : ''}. Use <b>+ Add line</b> for more.</p>
+        )}
+        <datalist id="inv-prodsugg">
+          {productOptions.map((p) => <option key={p.key} value={p.name} label={[p.sku, p.unit_price != null ? money(p.unit_price) : null].filter(Boolean).join(' · ')} />)}
+        </datalist>
+        <datalist id="inv-skusugg">
+          {productOptions.filter((p) => p.sku).map((p) => <option key={p.key} value={p.sku} label={[p.name, p.unit_price != null ? money(p.unit_price) : null].filter(Boolean).join(' · ')} />)}
+        </datalist>
         <div style={{ overflowX: 'auto' }}>
           <table className="inv-lines">
             <thead><tr><th>Service date</th><th>Product / Service</th><th>SKU</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th><th>Tax</th>{editable && <th />}</tr></thead>
@@ -295,8 +344,8 @@ export default function Invoices() {
               {form.lines.map((l, i) => (
                 <tr key={i}>
                   <td><input type="date" className="inv-sdate" value={l.service_date || ''} disabled={!editable} onChange={(e) => setLine(i, 'service_date', e.target.value)} /></td>
-                  <td><input value={l.product_name || ''} disabled={!editable} onChange={(e) => setLine(i, 'product_name', e.target.value)} /></td>
-                  <td><input className="inv-sku" value={l.sku || ''} disabled={!editable} onChange={(e) => setLine(i, 'sku', e.target.value)} /></td>
+                  <td><input list="inv-prodsugg" autoComplete="off" placeholder="Search product…" value={l.product_name || ''} disabled={!editable} onChange={(e) => onProductType(i, e.target.value)} /></td>
+                  <td><input list="inv-skusugg" autoComplete="off" placeholder="Search SKU…" className="inv-sku" value={l.sku || ''} disabled={!editable} onChange={(e) => onSkuType(i, e.target.value)} /></td>
                   <td><input value={l.description || ''} disabled={!editable} onChange={(e) => setLine(i, 'description', e.target.value)} /></td>
                   <td><input type="number" className="inv-qty" value={l.quantity} disabled={!editable} onChange={(e) => editLineNum(i, 'quantity', e.target.value)} /></td>
                   <td><input type="number" step="0.01" className="inv-rate" value={l.unit_price} disabled={!editable} onChange={(e) => editLineNum(i, 'unit_price', e.target.value)} /></td>
@@ -331,7 +380,8 @@ export default function Invoices() {
           {editable && <button className="secondary" onClick={() => act('save')} disabled={busy}>Save draft</button>}
           {status === 'draft' && <button onClick={() => act('confirm')} disabled={busy}>Confirm</button>}
           {status === 'confirmed' && <button className="secondary" onClick={() => act('reopen')} disabled={busy}>Reopen</button>}
-          {status === 'confirmed' && <button onClick={() => act('push')} disabled={busy || !data.qb?.connected} title={data.qb?.connected ? '' : 'Connect QuickBooks first'}>Push to QuickBooks ↗</button>}
+          {status === 'confirmed' && dirty && <span className="note" style={{ color: '#a16207' }}>Unsaved edits — Save draft, then Confirm & Push.</span>}
+          {status === 'confirmed' && <button onClick={() => act('push')} disabled={busy || !data.qb?.connected || dirty} title={!data.qb?.connected ? 'Connect QuickBooks first' : dirty ? 'Save your changes first — QuickBooks receives the saved invoice, not unsaved edits' : ''}>Push to QuickBooks ↗</button>}
         </div>
       </div>
     </>

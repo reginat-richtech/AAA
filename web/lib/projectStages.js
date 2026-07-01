@@ -98,6 +98,7 @@ const invoicesOf = (rows) => (Array.isArray(rows) ? rows : []).map((iv) => ({
   customer_name: iv.customer_name || null,
   total: (Array.isArray(iv.lines) ? iv.lines : []).reduce((s, l) => s + invLineAmt(l), 0),
   pushed: !!iv.qb_doc_number,
+  paid: !!iv.qb_paid,   // settled in QuickBooks (balance 0) — drives Stage 9 completion
 }));
 
 // Final Proposal Form checklist, computed from a captured ops.project_proposal
@@ -150,6 +151,11 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
   // says the install passed/completed (a Fail/Incomplete report leaves it pending).
   const inst = install || null;
   const installComplete = !!inst && /complete|pass|success|finish|done/i.test(inst.status || '');
+
+  // Stage 9 (Finance) auto-completes when the work is delivered AND the money is in:
+  // the on-site install passed (Stage 8) AND a connected invoice is paid in QuickBooks.
+  const anyInvoicePaid = projInvoices.some((iv) => iv.paid);
+  const financeDone = installComplete && anyInvoicePaid;
 
   // Manager approval is satisfied by the in-app "Approve & schedule" (status=approved)
   // OR a JotForm workflow approval — a jotform_stage_event(stage='approved') whose
@@ -210,7 +216,8 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
         return projInvoices.map((iv) => task(
           `Invoice ${iv.number || '(draft)'}`,
           iv.pushed ? true : null,
-          [iv.customer_name, iv.total ? `$${iv.total.toLocaleString()}` : null, iv.status].filter(Boolean).join(' · ') || null));
+          [iv.customer_name, iv.total ? `$${iv.total.toLocaleString()}` : null, iv.status].filter(Boolean).join(' · ') || null,
+          `/invoices?id=${iv.id}`));
       case 'request':
         return [
           task('Request form drafted', !!submission, submission ? `by ${submission.submitted_by || ''}` : null),
@@ -268,14 +275,16 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
           task('Customer sign-off', inst ? !!inst.customer_signed : null, inst?.customer_signed ? 'signed' : null),
           task('Project complete', inst ? installComplete : null, inst ? (inst.status || null) : null),
         ];
-      case 'finance':
+      case 'finance': {
+        const anyPushed = projInvoices.some((iv) => iv.pushed);
         return [
-          task('Final invoice issued & sent', null),
-          task('Payment received', null),
-          task('Income reconciled in QuickBooks', null),
+          task('Final invoice issued & sent', anyPushed || null, anyPushed ? 'pushed to QuickBooks' : null),
+          task('Payment received', anyInvoicePaid || null, anyInvoicePaid ? 'invoice paid in QuickBooks' : null),
+          task('Income reconciled in QuickBooks', anyInvoicePaid || null),
           task('Expenses & travel costs reconciled', null),
-          task('Project financials closed', null),
+          task('Project financials closed', financeDone || null),
         ];
+      }
       default: return [];
     }
   };
@@ -287,9 +296,12 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
     label: s.key === 'proposal' ? (type === 'event' ? 'Event Rental Form' : 'Project Proposal Form') : s.label,
     // The Invoice stage isn't part of the tracked workflow, but light its bubble
     // up as DONE once an invoice exists (created in-app or connected from QuickBooks).
+    // Finance (Stage 9) likewise auto-completes when installed + invoice paid.
     status: s.key === 'invoice'
       ? (projInvoices.length ? 'done' : 'manual')
-      : !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
+      : s.key === 'finance'
+        ? (financeDone ? 'done' : 'manual')
+        : !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
     tasks: tasksFor(s.key),
   }));
 
@@ -323,7 +335,8 @@ export function buildProposalProject(proposal, invoices = []) {
   const projInvoices = invoicesOf(invoices);
   const invTasks = projInvoices.map((iv) => task(
     `Invoice ${iv.number || '(draft)'}`, iv.pushed ? true : null,
-    [iv.customer_name, iv.total ? `$${iv.total.toLocaleString()}` : null, iv.status].filter(Boolean).join(' · ') || null));
+    [iv.customer_name, iv.total ? `$${iv.total.toLocaleString()}` : null, iv.status].filter(Boolean).join(' · ') || null,
+    `/invoices?id=${iv.id}`));
   const done = { proposal: true };
   let stageIdx = 0;
   PROJECT_STAGES.forEach((s, i) => { if (s.tracked && done[s.key]) stageIdx = i; });
