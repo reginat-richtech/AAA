@@ -7,16 +7,18 @@
 // (ops.travel_request + /travel-requests). There is intentionally no travel stage
 // here anymore.
 
+// Colors follow a blue→green sequential ramp (kept in sync with STAGE_RAMP in
+// app/_components/blueprint.js, which is the ramp actually rendered).
 export const PROJECT_STAGES = [
-  { key: 'proposal', label: 'Final Proposal Form', color: '#ef4444', tracked: true },
-  { key: 'agreement', label: 'Agreement', color: '#f97316', tracked: true },
-  { key: 'invoice', label: 'QuickBooks Invoice', color: '#eab308', tracked: false },
-  { key: 'request', label: 'Technician Request Form', color: '#84cc16', tracked: true },
-  { key: 'review', label: 'Tech Department Review & Approve', color: '#22c55e', tracked: true },
-  { key: 'prep', label: 'Team Preparation', color: '#14b8a6', tracked: true },
-  { key: 'confirmation', label: 'Technician Confirmation', color: '#0ea5e9', tracked: true },
-  { key: 'closure', label: 'Installation & Closure', color: '#8b5cf6', tracked: true },
-  { key: 'finance', label: 'Finance Review & Reconciliation', color: '#ec4899', tracked: false },
+  { key: 'proposal', label: 'Final Proposal Form', color: '#1e40af', tracked: true },
+  { key: 'agreement', label: 'Agreement', color: '#1d4ed8', tracked: true },
+  { key: 'invoice', label: 'QuickBooks Invoice', color: '#2563eb', tracked: false },
+  { key: 'request', label: 'Technician Request Form', color: '#0ea5e9', tracked: true },
+  { key: 'review', label: 'Tech Department Review & Approve', color: '#06b6d4', tracked: true },
+  { key: 'prep', label: 'Team Preparation', color: '#0d9488', tracked: true },
+  { key: 'confirmation', label: 'Technician Confirmation', color: '#059669', tracked: true },
+  { key: 'closure', label: 'Installation & Closure', color: '#16a34a', tracked: true },
+  { key: 'finance', label: 'Finance Review & Reconciliation', color: '#15803d', tracked: false },
 ];
 
 // The Step-1 (Final Proposal Form) intake checklist. Each item is computed from
@@ -82,6 +84,13 @@ const dealOf = (p) => (p && p.deal_id ? {
 // Invoices connected to this project (ops.invoice rows whose project_id = the
 // project id). Each is reduced to a compact card for the tracker's invoice stage.
 const invLineAmt = (l) => (l && l.amount != null && l.amount !== '' ? Number(l.amount) : (Number(l?.quantity) || 0) * (Number(l?.unit_price) || 0));
+// Project TYPE is decided by which entry form created it: the Event/Rental form
+// (241075943618158) → 'event', the Project Proposal form (or an agreement with no
+// matched proposal) → 'installation'. Both share the same 9 stages; only Stage 1's
+// label adapts. Keep this id in sync with the proposal webhook's EVENT_FORM_ID.
+export const EVENT_FORM_ID = '241075943618158';
+export const projectTypeOf = (proposal) => (proposal && String(proposal.form_id) === EVENT_FORM_ID ? 'event' : 'installation');
+
 const invoicesOf = (rows) => (Array.isArray(rows) ? rows : []).map((iv) => ({
   id: typeof iv.id === 'string' ? iv.id : String(iv.id),
   number: iv.invoice_number || iv.qb_doc_number || null,
@@ -271,8 +280,11 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
     }
   };
 
+  const type = projectTypeOf(proposal);
   const nodes = PROJECT_STAGES.map((s, i) => ({
     ...s,
+    // Stage 1's label adapts to the project type (Event Rental vs Final Proposal).
+    label: s.key === 'proposal' ? (type === 'event' ? 'Event Rental Form' : 'Project Proposal Form') : s.label,
     // The Invoice stage isn't part of the tracked workflow, but light its bubble
     // up as DONE once an invoice exists (created in-app or connected from QuickBooks).
     status: s.key === 'invoice'
@@ -290,6 +302,7 @@ export function buildProject(a, submission, confirmation, approvedSubmissionIds 
     jotform_url: jfUrl, calendar_link: cal?.html_link || null,
     prep_all_done: prepAllDone, confirmation_done: !!conf,
     proposal_id: proposal?.id || null, deal: dealOf(proposal),
+    type,
     invoices: projInvoices,
     shipment: shipment ? {
       status: shipment.status || 'pending',
@@ -314,8 +327,10 @@ export function buildProposalProject(proposal, invoices = []) {
   const done = { proposal: true };
   let stageIdx = 0;
   PROJECT_STAGES.forEach((s, i) => { if (s.tracked && done[s.key]) stageIdx = i; });
+  const type = projectTypeOf(p);
   const nodes = PROJECT_STAGES.map((s, i) => ({
     ...s,
+    label: s.key === 'proposal' ? (type === 'event' ? 'Event Rental Form' : 'Project Proposal Form') : s.label,
     status: s.key === 'invoice'
       ? (projInvoices.length ? 'done' : 'manual')
       : !s.tracked ? 'manual' : done[s.key] ? 'done' : i === stageIdx ? 'current' : 'pending',
@@ -332,6 +347,7 @@ export function buildProposalProject(proposal, invoices = []) {
     stage: stageIdx, stage_key: 'proposal',
     jotform_url: jotformUrl(p.submission_id), calendar_link: null, is_proposal_only: true,
     proposal_id: p.id, deal: dealOf(p),
+    type,
     invoices: projInvoices,
     nodes,
   };

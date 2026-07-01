@@ -30,9 +30,15 @@ export async function GET() {
   const byRel = {};
   for (const r of counts) byRel[r.rel] = Number(r.n);
 
+  // Only surface tables that actually hold data. This hides the empty schema
+  // scaffolding (crm / hr / invoicing / legal / workflow, and unused core/privacy
+  // tables) so the browser lists just the tables worth opening. A schema left
+  // with no non-empty tables drops out of the list entirely.
   const grouped = {};
   for (const t of tables) {
-    (grouped[t.schema] = grouped[t.schema] || []).push({ name: t.name, rows: byRel[`${t.schema}.${t.name}`] ?? 0 });
+    const rows = byRel[`${t.schema}.${t.name}`] ?? 0;
+    if (rows <= 0) continue;
+    (grouped[t.schema] = grouped[t.schema] || []).push({ name: t.name, rows });
   }
   return NextResponse.json({
     schemas: Object.entries(grouped).map(([schema, tbls]) => ({ schema, tables: tbls })),

@@ -62,8 +62,10 @@ export async function mutateAs(actorEmail, fn) {
 }
 
 // Schemas this admin tool is allowed to read in the DB browser.
+// `ext` holds the synced integration mirrors (Navan / JotForm / HubSpot / QuickBooks
+// + PM tables), so it must be listed for that data to appear in the browser.
 export const BROWSABLE_SCHEMAS = [
-  'core', 'crm', 'hr', 'inventory', 'invoicing', 'legal', 'ops', 'workflow', 'privacy', 'audit',
+  'core', 'crm', 'ext', 'hr', 'inventory', 'invoicing', 'legal', 'ops', 'workflow', 'privacy', 'audit',
 ];
 
 // Confirm a schema.table really exists (guards the DB-browser against

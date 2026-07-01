@@ -17,6 +17,7 @@ function dotStyle(node, color) {
 export default function ProjectTracker() {
   const [data, setData] = useState({ stages: [], projects: [], counts: {} });
   const [q, setQ] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'installation' | 'event'
   const [open, setOpen] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null); // { pid, text, err }
@@ -137,37 +138,50 @@ export default function ProjectTracker() {
   );
   const unlinkInvoice = (p, invoiceId) => postConnect(p, { project_id: null, invoice_id: invoiceId }, 'Invoice unlinked.');
 
-  const projects = data.projects.filter((p) => {
+  const typeOf = (p) => p.type || 'installation';
+  const typeCounts = data.projects.reduce((m, p) => { const t = typeOf(p); m[t] = (m[t] || 0) + 1; return m; }, {});
+  const matchesSearch = (p) => {
     if (!q) return true;
     const hay = `${p.project_number} ${p.contract_number} ${p.counterparty} ${p.salesman_name} ${p.so_number} ${p.robot_types}`.toLowerCase();
     return hay.includes(q.toLowerCase());
-  });
+  };
+  const typeFiltered = data.projects.filter((p) => typeFilter === 'all' || typeOf(p) === typeFilter);
+  const projects = typeFiltered.filter(matchesSearch);
+  // Rail reflects the active type filter (not the search box) so the overview matches the view.
+  const railCounts = {};
+  for (const s of STAGES) railCounts[s.key] = 0;
+  for (const p of typeFiltered) railCounts[p.stage_key] = (railCounts[p.stage_key] || 0) + 1;
+  railCounts.invoice = typeFiltered.filter((p) => (p.invoices || []).length > 0).length;
+  const railProposalLabel = typeFilter === 'event' ? 'Event Rental Form'
+    : typeFilter === 'installation' ? 'Project Proposal Form' : 'Proposal / Event Form';
+  const railStages = STAGES.map((s) => (s.key === 'proposal' ? { ...s, label: railProposalLabel } : s));
+  const TYPE_TABS = [['all', 'All'], ['installation', 'Full Installation'], ['event', 'Event / Rental']];
 
   return (
     <>
-      <PageHeader title="Project Tracker" sub="Read-only workflow tree per project. Each project starts from the Final Proposal Form, then advances through 9 stages as its agreement, tech request, approval, and confirmation steps complete." sheet="Project Tracker" />
+      <PageHeader title="Project Tracker" sub="Read-only workflow tree per project. Each project starts from its entry form — Project Proposal (Full Installation) or Event Rental (Event) — then advances through 9 stages as its agreement, tech request, approval, and confirmation steps complete." sheet="Project Tracker" />
 
       <section className="panel">
-        <div className="panel-title"><h2>Project process tracker</h2><span className="meta">9 stages · red → blue</span></div>
-        <StageRail stages={STAGES} counts={data.counts} />
+        <div className="panel-title"><h2>Project process tracker</h2><span className="meta">9 stages</span></div>
+        <StageRail stages={railStages} counts={railCounts} />
         <div className="rail-legend">
           <span><i className="done" /> done</span>
           <span><i className="next" /> next action</span>
           <span><i className="ref" /> reference stage</span>
           <span><i className="pend" /> pending</span>
-          <span className="note">· nodes take each stage's color (1→9 red → blue)</span>
+          <span className="note">· nodes fill in as each stage completes</span>
         </div>
         <style>{`
           .rail-legend { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; margin-top:14px; padding-top:12px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--muted); }
           .rail-legend i { display:inline-block; width:13px; height:13px; border-radius:50%; margin-right:6px; vertical-align:-2px; border:2px solid var(--line); background:#fff; }
-          .rail-legend i.done { background:var(--primary); border-color:var(--primary); }
-          .rail-legend i.next { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.25); }
+          .rail-legend i.done { background:#0ea5e9; border-color:#0ea5e9; }
+          .rail-legend i.next { border-color:#0ea5e9; box-shadow:0 0 0 3px rgba(14,165,233,.25); }
           .rail-legend i.ref { border-style:dashed; }
           .ship-chip { font-size:11px; font-weight:700; padding:1px 8px; border-radius:999px; border:1px solid; white-space:nowrap; }
           .ship-pending { background:var(--chip); color:var(--muted); border-color:var(--line); }
           .ship-shipped { background:#dbeafe; color:#1d4ed8; border-color:#bfdbfe; }
           .ship-delivered { background:#dcfce7; color:#15803d; border-color:#bbf7d0; }
-          .deal-box { margin:8px 0 4px 22px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:rgba(255,122,0,.05); font-size:12.5px; }
+          .deal-box { margin:8px 0 4px 22px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:rgba(5,150,105,.05); font-size:12.5px; }
           .deal-head { font-size:13px; }
           .deal-cust { margin:5px 0; display:flex; flex-direction:column; gap:2px; }
           .deal-picker { margin-top:8px; }
@@ -176,15 +190,31 @@ export default function ProjectTracker() {
           .deal-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:5px 8px; border-bottom:1px solid var(--line); }
           .deal-row:last-child { border-bottom:0; }
           .deal-row:nth-child(even) { background:rgba(29,78,216,.04); }
-          .inv-link-box { margin:8px 0 4px 22px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:rgba(234,179,8,.07); font-size:12.5px; }
+          .inv-link-box { margin:8px 0 4px 22px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:rgba(5,150,105,.07); font-size:12.5px; }
           .inv-link-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:3px 0; }
           .inv-qb-tag { display:inline-block; font-size:10px; font-weight:800; color:#0f7a3d; background:rgba(45,168,89,.14); border:1px solid rgba(45,168,89,.4); border-radius:4px; padding:0 4px; margin-right:6px; vertical-align:1px; }
+          .type-seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#fff; }
+          .seg-btn { border:0; background:transparent; color:var(--muted); padding:6px 13px; font-size:12.5px; font-weight:600; cursor:pointer; border-right:1px solid var(--line); }
+          .seg-btn:last-child { border-right:0; }
+          .seg-btn.on { background:var(--primary); color:#fff; }
+          .pc-type { display:inline-block; font-size:10px; font-weight:800; letter-spacing:.03em; text-transform:uppercase; padding:1px 7px; border-radius:999px; margin:0 8px; vertical-align:2px; }
+          .pc-type-event { background:rgba(5,150,105,.14); color:#047857; border:1px solid rgba(5,150,105,.4); }
+          .pc-type-installation { background:rgba(29,78,216,.10); color:#1d4ed8; border:1px solid rgba(29,78,216,.32); }
+          .pcard-installation { background:var(--surface); box-shadow:inset 4px 0 0 #1d4ed8, var(--shadow); }
+          .pcard-event { background:var(--surface); box-shadow:inset 4px 0 0 #059669, var(--shadow); }
         `}</style>
       </section>
 
       <div className="toolbar">
-        <input placeholder="Search client, salesman, SO#, robot…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 320 }} />
-        <span className="note">{projects.length} project(s)</span>
+        <input placeholder="Search client, salesman, SO#, robot…" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 280 }} />
+        <div className="type-seg">
+          {TYPE_TABS.map(([k, lbl]) => (
+            <button key={k} className={`seg-btn${typeFilter === k ? ' on' : ''}`} onClick={() => setTypeFilter(k)}>
+              {lbl} · {k === 'all' ? data.projects.length : (typeCounts[k] || 0)}
+            </button>
+          ))}
+        </div>
+        <span className="note">{projects.length} shown</span>
       </div>
 
       {projects.length === 0 && <p className="note">No projects yet — a project starts when a Final Proposal Form is submitted.</p>}
@@ -199,13 +229,14 @@ export default function ProjectTracker() {
           : sh.est_ship_date ? `Ships ${new Date(sh.est_ship_date).toLocaleDateString()}`
           : sh.status);
         return (
-          <div className="pcard" id={`proj-${p.id}`} key={p.id} onClick={() => setOpen(isOpen ? null : p.id)}>
+          <div className={`pcard pcard-${typeOf(p)}`} id={`proj-${p.id}`} key={p.id} onClick={() => setOpen(isOpen ? null : p.id)}>
             <div className="pc-head">
               <div className="pc-title">
                 <span className="pc-id">{p.project_number}</span>
+                <span className={`pc-type pc-type-${typeOf(p)}`}>{typeOf(p) === 'event' ? 'Event' : 'Full Install'}</span>
                 <span className="pc-name">{p.title || p.counterparty || '—'}</span>
               </div>
-              <span className="pc-stage" style={{ background: curColor }}>Stage {p.stage + 1}/9 · {cur.label}</span>
+              <span className="pc-stage" style={{ background: curColor }}>Stage {p.stage + 1}/9</span>
             </div>
 
             <div className="pc-meta">

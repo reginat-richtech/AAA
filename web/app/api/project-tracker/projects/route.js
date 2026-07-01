@@ -98,7 +98,7 @@ export async function GET() {
   let proposals = [];
   try {
     proposals = (await query(
-      `select id, submission_id, project_number, contract_number, project_name, customer_name, customer_email,
+      `select id, submission_id, form_id, project_number, contract_number, project_name, customer_name, customer_email,
               sales_name, sales_email, deployment_url, site_survey_url, packing_list_url,
               site_survey_done, predeploy_review_done, project_info, package_list, created_at,
               deal_id, deal_name, deal_amount, deal_customer

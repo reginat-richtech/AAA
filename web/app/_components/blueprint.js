@@ -2,9 +2,11 @@
 // Pure/presentational (no hooks) so they can be used from any page.
 import { PROJECT_STAGES } from '../../lib/projectStages';
 
-// Stage color ramp, order 1→9. Overrides the raw colors in projectStages.js
-// while names + tracked flags stay sourced from projectStages.js (single source).
-export const STAGE_RAMP = ['#f97316', '#f59e0b', '#65a30d', '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#1d4ed8', '#2563eb'];
+// Every stage bubble is the same sky blue — flat, no gradient across stages.
+// (done / current / pending are shown by fill / ring / hollow node state, not by
+// hue.) Overrides the raw colors in projectStages.js while names + tracked flags
+// stay sourced there.
+export const STAGE_RAMP = Array(PROJECT_STAGES.length).fill('#0ea5e9');
 
 // Final stage model: names + tracked from the source of truth, colors from the ramp.
 export const STAGES = PROJECT_STAGES.map((s, i) => ({ ...s, color: STAGE_RAMP[i] }));
