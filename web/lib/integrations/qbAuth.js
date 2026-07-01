@@ -74,7 +74,7 @@ export async function saveQbCredential({ refresh_token, realm_id, environment, c
 
 export async function qbStatus() {
   const cred = await getQbCredential();
-  return { configured: qbConfigured(), connected: !!cred, realm: cred?.realm_id || null, company: cred?.company_name || null };
+  return { configured: qbConfigured(), connected: !!cred, realm: cred?.realm_id || null, company: cred?.company_name || null, environment: cred?.environment || qbEnvironment() };
 }
 
 // Make an authenticated QuickBooks API call. Refreshes the access token (and

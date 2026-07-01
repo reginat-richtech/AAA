@@ -69,6 +69,16 @@ export default function Invoices() {
 
   const load = () => fetch('/api/invoices').then((r) => r.json()).then((d) => { if (d?.error) setErr(d.error); else setData(d); }).catch(() => {}).finally(() => setLoaded(true));
   useEffect(() => { load(); }, []);
+  // Re-check status when the tab regains focus. Connecting QuickBooks happens in a
+  // separate OAuth flow that doesn't return here, so this refreshes the "connected"
+  // banner (and QB lists) automatically instead of needing a manual page refresh.
+  // Only `data` is replaced — an open/edited invoice form is untouched.
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') load(); };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, []);
 
   // Open/replace the editor form and snapshot it as the saved baseline, so `dirty`
   // (unsaved edits) starts false. Pass null to return to the list view.
@@ -275,6 +285,10 @@ export default function Invoices() {
   const t = calc(form);
   const status = form.status || 'draft';
   const editable = status !== 'pushed';
+  // Link to this invoice inside QuickBooks Online (only once it's been pushed and has
+  // a QB txn id). Opens the invoice for whatever company the user is signed into in QBO.
+  const qboBase = data.qb?.environment === 'sandbox' ? 'https://sandbox.qbo.intuit.com' : 'https://qbo.intuit.com';
+  const qbInvoiceUrl = form.qb_invoice_id ? `${qboBase}/app/invoice?txnId=${form.qb_invoice_id}` : null;
   // Unsaved edits vs the last saved snapshot. Push sends the SAVED row (the server
   // pushes the DB record, not the posted form), so block Push until edits are saved
   // — otherwise QuickBooks would silently receive the old, pre-edit invoice.
@@ -307,6 +321,7 @@ export default function Invoices() {
         <button className="secondary" onClick={() => { openForm(null); load(); }}>← All invoices</button>
         <span className={`inv-st s-${status}`}>{status}</span>
         {form.qb_doc_number && <span className="note">QB invoice #{form.qb_doc_number}</span>}
+        {qbInvoiceUrl && <a href={qbInvoiceUrl} target="_blank" rel="noreferrer">Open in QuickBooks ↗</a>}
         {form.confirmed_by && status !== 'draft' && <span className="note">confirmed by {form.confirmed_by}</span>}
         {form.project_id && <a href={`/project-tracker?open=${encodeURIComponent(form.project_id)}`} target="_blank" rel="noreferrer" style={{ marginLeft: 'auto' }}>📋 Open in Project Tracker ↗</a>}
       </div>
