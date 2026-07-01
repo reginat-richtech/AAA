@@ -297,6 +297,13 @@ async function pushToQb(inv, user) {
     const cr = await qbApiRequest(`/query?query=${encodeURIComponent(`select * from Class where Name = '${String(inv.class_name).replace(/['\\]/g, ' ')}'`)}`);
     classId = cr.data?.QueryResponse?.Class?.[0]?.Id || null;
   }
+  // Terms → QB SalesTermRef (looked up by name, best-effort — e.g. "Net 30").
+  let termRef = null;
+  if (inv.terms) {
+    const tr = await qbApiRequest(`/query?query=${encodeURIComponent(`select * from Term where Name = '${String(inv.terms).replace(/['\\]/g, ' ')}'`)}`);
+    const tid = tr.data?.QueryResponse?.Term?.[0]?.Id;
+    if (tid) termRef = { value: String(tid) };
+  }
   const qbLines = lines.map((l) => ({
     DetailType: 'SalesItemLineDetail',
     Amount: l.amount != null ? Number(l.amount) : (Number(l.quantity) || 1) * (Number(l.unit_price) || 0),
@@ -308,6 +315,19 @@ async function pushToQb(inv, user) {
       ...(classId ? { ClassRef: { value: classId } } : {}),
     },
   }));
+  // Carry the app's discount + tax so QB totals match the app. The discount goes
+  // in as a DiscountLine after the item lines; tax is a best-effort total override.
+  // Both optional — omitted when unused, so plain invoices push exactly as before.
+  const lineAmt = (l) => (l.amount != null ? Number(l.amount) : (Number(l.quantity) || 1) * (Number(l.unit_price) || 0));
+  const taxableSubtotal = lines.filter((l) => l.taxable !== false).reduce((s, l) => s + lineAmt(l), 0);
+  const discVal = Number(inv.discount_value) || 0;
+  if (discVal > 0) {
+    qbLines.push(inv.discount_type === 'percent'
+      ? { DetailType: 'DiscountLineDetail', DiscountLineDetail: { PercentBased: true, DiscountPercent: discVal } }
+      : { Amount: discVal, DetailType: 'DiscountLineDetail', DiscountLineDetail: { PercentBased: false } });
+  }
+  const taxRate = Number(inv.tax_rate) || 0;
+  const taxAmt = Math.round(taxableSubtotal * taxRate) / 100; // taxableSubtotal × rate%
   // Map P.O. Number + Project Manager into real QB sales custom fields when ones
   // exist (matched by name); QB custom-field StringValue maxes at 31 chars.
   let cfDefs = [];
@@ -335,6 +355,10 @@ async function pushToQb(inv, user) {
     ...(inv.customer_email ? { BillEmail: { Address: inv.customer_email } } : {}),
     ...(inv.invoice_date ? { TxnDate: String(inv.invoice_date).slice(0, 10) } : {}),
     ...(inv.due_date ? { DueDate: String(inv.due_date).slice(0, 10) } : {}),
+    ...(termRef ? { SalesTermRef: termRef } : {}),
+    ...(taxRate > 0 && taxAmt > 0 ? { TxnTaxDetail: { TotalTax: taxAmt } } : {}),
+    ...(inv.billing_address ? { BillAddr: { Line1: String(inv.billing_address).slice(0, 500) } } : {}),
+    ...(inv.shipping_address ? { ShipAddr: { Line1: String(inv.shipping_address).slice(0, 500) } } : {}),
     // No DocNumber on purpose: this QuickBooks company auto-numbers invoices as "SO####"
     // ("Custom transaction numbers" is OFF), so we let QuickBooks assign the next number
     // and capture it below — pushed invoices continue the SO#### series rather than the
