@@ -32,7 +32,7 @@ function normLines(arr) {
 
 const INV_COLS = `id, project_id, status, currency, lines, notes, customer_name, customer_email,
   billing_address, shipping_address, invoice_number, invoice_date, due_date, terms, customer_message,
-  po_number, payment_instructions, project_manager, tags, class_name, discount_type, discount_value, tax_rate, confirmed_by, confirmed_at,
+  po_number, so_number, payment_instructions, project_manager, tags, class_name, discount_type, discount_value, tax_rate, confirmed_by, confirmed_at,
   qb_invoice_id, qb_doc_number, pushed_at, push_error, created_by, created_at, updated_at`;
 
 const normTags = (arr) => [...new Set((Array.isArray(arr) ? arr : []).map((t) => String(t).trim()).filter(Boolean))].slice(0, 20);
@@ -107,7 +107,7 @@ async function seedFromProject(projectId) {
   if (!ag) return null;
   let prop = null;
   try {
-    const props = (await query('select id::text as id, contract_number, customer_name, customer_email, address, deal_customer from ops.project_proposal')).rows;
+    const props = (await query('select id::text as id, contract_number, customer_name, customer_email, address, pm_name, deal_customer from ops.project_proposal')).rows;
     const byId = {}, byC = {}, byN = {};
     for (const p of props) { byId[p.id] = p; const c = normSo(p.contract_number); if (c && !(c in byC)) byC[c] = p; const n = normName(p.customer_name); if (n && !(n in byN)) byN[n] = p; }
     // Prefer the explicit proposal_id link (set by "+ Upload agreement"); then
@@ -166,12 +166,25 @@ async function seedFromProject(projectId) {
   ]);
   // Default = the Final Proposal Form value when present, else the first available.
   const pref = (list) => (list.find((x) => x.source === 'proposal') || list[0])?.value || '';
+  // SO number for the autofill: the project's Technician Request submission carries it
+  // (answers.so_number); newest wins. Fall back to the proposal/agreement contract number.
+  let so_number = '';
+  try {
+    const soRow = (await query(
+      `select answers->>'so_number' as so from ops.tech_request_submission
+        where agreement_id::text = $1 and coalesce(answers->>'so_number', '') <> ''
+        order by created_at desc limit 1`, [ag.id],
+    )).rows[0];
+    so_number = (soRow?.so || prop?.contract_number || ag.contract_number || '').trim();
+  } catch { /* tech_request_submission absent */ }
   return {
     project_id: ag.id, project_number: ag.project_number,
     customer_name: pref(sName),
     customer_email: pref(sEmail),
     billing_address: pref(sAddr),
     shipping_address: pref(sAddr),
+    so_number,
+    project_manager: (prop?.pm_name || '').trim(),   // Project Manager captured on the proposal
     suggest: { customer_name: sName, customer_email: sEmail, billing_address: sAddr, shipping_address: sAddr },
     inventory_fixed,                 // true → lines came from a checked-out (locked) cart
     inventory_count: cart.length,    // how many inventory lines were autofilled
@@ -225,32 +238,32 @@ export async function POST(req) {
     stampConfirm ? user.email : (current?.confirmed_by ?? null), // confirmed_by (index 17)
     f('po_number'), f('payment_instructions'),
     JSON.stringify(b.tags !== undefined ? normTags(b.tags) : (current?.tags || [])), f('class_name'),
-    f('project_manager'),
-  ]; // 23 params
+    f('project_manager'), f('so_number'),
+  ]; // 24 params
 
   const row = await mutateAs(user.email, async (q) => {
     if (id) {
-      // $1 = id (WHERE); $2..$24 = the 23 common fields. created_by is intentionally NOT updated.
+      // $1 = id (WHERE); $2..$25 = the 24 common fields. created_by is intentionally NOT updated.
       const { rows } = await q(
         `update ops.invoice set project_id=$2, status=$3, currency=$4, lines=$5::jsonb, notes=$6,
            customer_name=$7, customer_email=$8, billing_address=$9, shipping_address=$10, invoice_number=$11,
            invoice_date=$12, due_date=$13, terms=$14, customer_message=$15, discount_type=$16, discount_value=$17,
            tax_rate=$18, confirmed_by=$19, po_number=$20, payment_instructions=$21, tags=$22::jsonb, class_name=$23,
-           project_manager=$24, confirmed_at=${stampConfirm ? 'now()' : 'confirmed_at'}, updated_at=now()
+           project_manager=$24, so_number=$25, confirmed_at=${stampConfirm ? 'now()' : 'confirmed_at'}, updated_at=now()
          where id=$1 returning ${INV_COLS}`,
         [id, ...common],
       );
       return rows[0];
     }
-    // INSERT: created_by ($19) spliced in right after confirmed_by; no id (it's generated). $1..$24.
+    // INSERT: created_by ($19) spliced in right after confirmed_by; no id (it's generated). $1..$25.
     const insertVals = [...common.slice(0, 18), user.email, ...common.slice(18)];
     const { rows } = await q(
       `insert into ops.invoice (project_id, status, currency, lines, notes, customer_name, customer_email,
          billing_address, shipping_address, invoice_number, invoice_date, due_date, terms, customer_message,
-         discount_type, discount_value, tax_rate, confirmed_by, created_by, confirmed_at, po_number, payment_instructions, tags, class_name, project_manager, updated_at)
+         discount_type, discount_value, tax_rate, confirmed_by, created_by, confirmed_at, po_number, payment_instructions, tags, class_name, project_manager, so_number, updated_at)
        values ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,
          coalesce($10, 'INV-' || lpad(nextval('ops.invoice_number_seq')::text, 4, '0')),
-         $11,$12,$13,$14,$15,$16,$17,$18, $19, ${stampConfirm ? 'now()' : 'null'}, $20, $21, $22::jsonb, $23, $24, now())
+         $11,$12,$13,$14,$15,$16,$17,$18, $19, ${stampConfirm ? 'now()' : 'null'}, $20, $21, $22::jsonb, $23, $24, $25, now())
        returning ${INV_COLS}`,
       insertVals,
     );

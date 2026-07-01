@@ -18,7 +18,7 @@ Account Number: 501028165183
 ACH Routing #: 122400724
 Wires Routing #: 026009593`;
 
-const blankForm = () => ({ id: null, project_id: '', customer_name: '', customer_email: '', billing_address: '', shipping_address: '', invoice_number: '', po_number: '', project_manager: '', invoice_date: today(), due_date: '', terms: '', class_name: '', tags: [], customer_message: '', payment_instructions: DEFAULT_PAYMENT_INSTRUCTIONS, notes: '', discount_type: 'amount', discount_value: '', tax_rate: '', currency: 'USD', lines: [blankLine()], status: 'draft' });
+const blankForm = () => ({ id: null, project_id: '', customer_name: '', customer_email: '', billing_address: '', shipping_address: '', invoice_number: '', po_number: '', so_number: '', project_manager: '', invoice_date: today(), due_date: '', terms: '', class_name: '', tags: [], customer_message: '', payment_instructions: DEFAULT_PAYMENT_INSTRUCTIONS, notes: '', discount_type: 'amount', discount_value: '', tax_rate: '', currency: 'USD', lines: [blankLine()], status: 'draft' });
 
 // Line amount = the explicit (editable) amount if set, else qty × rate.
 const lineAmount = (l) => (l.amount !== '' && l.amount != null ? Number(l.amount) : (Number(l.quantity) || 0) * (Number(l.unit_price) || 0));
@@ -161,15 +161,21 @@ export default function Invoices() {
       }),
     }));
   }
-  // Typing in a line's Product/Service box — fill the line if the text exactly matches a product, else keep as free text.
-  function onProductType(i, v) {
-    const m = productOptions.find((p) => (p.name || '').toLowerCase() === v.trim().toLowerCase());
-    if (m) fillLineFromProduct(i, m); else setLine(i, 'product_name', v);
+  // The Product/Service and SKU boxes are FREE TEXT while typing (onChange just sets
+  // the field), so editing and deleting are never interrupted. We only auto-fill the
+  // line from a matching product when the box is COMMITTED (onBlur) with a non-empty
+  // value that exactly matches. This fixes two bugs: (a) you couldn't delete the SKU
+  // because emptying it matched a product that has no SKU (via `p.sku || ''`), and
+  // (b) mid-edit keystrokes hijacked the line whenever they happened to match a product.
+  function onProductCommit(i, v) {
+    const s = v.trim(); if (!s) return;
+    const m = productOptions.find((p) => (p.name || '').toLowerCase() === s.toLowerCase());
+    if (m) fillLineFromProduct(i, m);
   }
-  // Typing in a line's SKU box — the SKU drives the product lookup (fills name + QB rate), else free text.
-  function onSkuType(i, v) {
-    const m = productOptions.find((p) => (p.sku || '').toLowerCase() === v.trim().toLowerCase());
-    if (m) fillLineFromProduct(i, m); else setLine(i, 'sku', v);
+  function onSkuCommit(i, v) {
+    const s = v.trim(); if (!s) return;
+    const m = productOptions.find((p) => (p.sku || '').toLowerCase() === s.toLowerCase());
+    if (m) fillLineFromProduct(i, m);
   }
 
   async function linkProject(pid) {
@@ -303,6 +309,7 @@ export default function Invoices() {
           <label>Due date<input type="date" value={form.due_date} disabled={!editable} onChange={(e) => set('due_date', e.target.value)} /></label>
           <label>Terms<select value={form.terms} disabled={!editable} onChange={(e) => set('terms', e.target.value)}>{TERMS.map((x) => <option key={x} value={x}>{x || '—'}</option>)}</select></label>
           <label>P.O. Number<input value={form.po_number || ''} disabled={!editable} onChange={(e) => set('po_number', e.target.value)} /></label>
+          <label>SO #<input value={form.so_number || ''} disabled={!editable} placeholder="Autofilled from linked project" onChange={(e) => set('so_number', e.target.value)} /></label>
           <label className="inv-grow" style={{ maxWidth: 280 }}>Project Manager{pmOptions.length ? <span className="note" style={{ fontWeight: 400 }}> · from QuickBooks</span> : null}
             <ComboSearch value={form.project_manager || ''} disabled={!editable} placeholder={pmOptions.length ? 'Pick or type a name…' : 'Type a name…'} options={pmOptions} onChange={(v) => set('project_manager', v)} onPick={(o) => set('project_manager', o.data)} />
           </label>
@@ -344,8 +351,8 @@ export default function Invoices() {
               {form.lines.map((l, i) => (
                 <tr key={i}>
                   <td><input type="date" className="inv-sdate" value={l.service_date || ''} disabled={!editable} onChange={(e) => setLine(i, 'service_date', e.target.value)} /></td>
-                  <td><input list="inv-prodsugg" autoComplete="off" placeholder="Search product…" value={l.product_name || ''} disabled={!editable} onChange={(e) => onProductType(i, e.target.value)} /></td>
-                  <td><input list="inv-skusugg" autoComplete="off" placeholder="Search SKU…" className="inv-sku" value={l.sku || ''} disabled={!editable} onChange={(e) => onSkuType(i, e.target.value)} /></td>
+                  <td><input list="inv-prodsugg" autoComplete="off" placeholder="Search product…" value={l.product_name || ''} disabled={!editable} onChange={(e) => setLine(i, 'product_name', e.target.value)} onBlur={(e) => onProductCommit(i, e.target.value)} /></td>
+                  <td><input list="inv-skusugg" autoComplete="off" placeholder="Search SKU…" className="inv-sku" value={l.sku || ''} disabled={!editable} onChange={(e) => setLine(i, 'sku', e.target.value)} onBlur={(e) => onSkuCommit(i, e.target.value)} /></td>
                   <td><input value={l.description || ''} disabled={!editable} onChange={(e) => setLine(i, 'description', e.target.value)} /></td>
                   <td><input type="number" className="inv-qty" value={l.quantity} disabled={!editable} onChange={(e) => editLineNum(i, 'quantity', e.target.value)} /></td>
                   <td><input type="number" step="0.01" className="inv-rate" value={l.unit_price} disabled={!editable} onChange={(e) => editLineNum(i, 'unit_price', e.target.value)} /></td>
